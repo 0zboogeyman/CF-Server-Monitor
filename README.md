@@ -557,7 +557,7 @@ Workers 环境下 CSP 会放在 HTTP Response Header 中返回，并同时设置
 
 **主题商店与 Workers 反代说明**：
 
-- 后台切换主题会保存 `theme_url`，格式为 `https://github.com/huilang-me/CFSM-Theme-Store/tree/dist/<作者>/<主题目录>/<版本号>`
+- 后台切换主题会保存 `theme_url`，格式为 `https://github.com/huilang-me/CFSM-Theme-Store/tree/dist/<作者>/<主题目录>/<版本号>`；主题商店也支持手动填写该 URL 来添加第三方主题
 - `theme_url` 留空时使用项目内置默认主题
 - Workers 仅反代所选主题的 `index.html` 和 `/assets/*`，例如 `/assets/app.css` 会映射到主题仓库同版本 `assets/app.css`
 - `install.sh`、`flags/`、`os-icons/`、favicon、API、管理端等其他路径不会走主题反代，仍返回项目原有文件或接口

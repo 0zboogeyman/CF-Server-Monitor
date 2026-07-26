@@ -24,6 +24,34 @@
         >↩ {{ trans.useBuiltinTheme }}</button>
       </div>
 
+      <div class="theme-custom mb-4">
+        <div class="theme-custom-header">
+          <div>
+            <div class="theme-custom-title">{{ trans.customThemeUrl }}</div>
+            <div class="theme-custom-desc">{{ trans.customThemeUrlDesc }}</div>
+          </div>
+        </div>
+        <div class="theme-custom-form">
+          <input
+            v-model.trim="customThemeUrl"
+            type="text"
+            class="form-input"
+            placeholder="https://github.com/Author/theme/tree/commitid"
+            @keyup.enter="applyCustomTheme"
+          >
+          <button
+            @click="previewCustomTheme"
+            class="btn"
+            :disabled="!customThemeUrl || previewingThemeId === '__custom__'"
+          >👁 {{ previewingThemeId === '__custom__' ? trans.saving : trans.preview }}</button>
+          <button
+            @click="applyCustomTheme"
+            class="btn btn-primary"
+            :disabled="!customThemeUrl || applyingThemeId === '__custom__'"
+          >⇄ {{ applyingThemeId === '__custom__' ? trans.saving : trans.applyCustomTheme }}</button>
+        </div>
+      </div>
+
       <div v-if="notice" :class="notice.type === 'success' ? 'warning-box' : 'danger-box'" class="mb-4">
         {{ notice.message }}
       </div>
@@ -130,6 +158,7 @@ const error = ref('')
 const notice = ref(null)
 const applyingThemeId = ref('')
 const previewingThemeId = ref('')
+const customThemeUrl = ref('')
 const selectedVersions = reactive({})
 
 const loadThemes = async () => {
@@ -239,15 +268,14 @@ const isCurrentTheme = (theme) => {
   return props.currentThemeUrl && props.currentThemeUrl === getSelectedThemeUrl(theme)
 }
 
-const previewTheme = async (theme) => {
-  const themeUrl = getSelectedThemeUrl(theme)
+const previewThemeUrl = async (themeUrl, previewingId) => {
   if (!themeUrl) {
     notice.value = { type: 'error', message: props.trans.themeUrlUnavailable }
     return
   }
 
   if (previewingThemeId.value) return
-  previewingThemeId.value = theme.id
+  previewingThemeId.value = previewingId
   notice.value = null
   try {
     const result = await adminApi({
@@ -272,6 +300,24 @@ const previewTheme = async (theme) => {
   } finally {
     previewingThemeId.value = ''
   }
+}
+
+const previewTheme = async (theme) => {
+  await previewThemeUrl(getSelectedThemeUrl(theme), theme.id)
+}
+
+const getCustomThemeUrl = () => {
+  return normalizeThemeStoreUrl(customThemeUrl.value)
+}
+
+const previewCustomTheme = async () => {
+  const themeUrl = getCustomThemeUrl()
+  if (!themeUrl) {
+    notice.value = { type: 'error', message: props.trans.invalidThemeUrl }
+    return
+  }
+  customThemeUrl.value = themeUrl
+  await previewThemeUrl(themeUrl, '__custom__')
 }
 
 const saveThemeUrl = async (themeUrl, applyingId) => {
@@ -306,6 +352,16 @@ const applyTheme = async (theme) => {
     return
   }
   await saveThemeUrl(themeUrl, theme.id)
+}
+
+const applyCustomTheme = async () => {
+  const themeUrl = getCustomThemeUrl()
+  if (!themeUrl) {
+    notice.value = { type: 'error', message: props.trans.invalidThemeUrl }
+    return
+  }
+  customThemeUrl.value = themeUrl
+  await saveThemeUrl(themeUrl, '__custom__')
 }
 
 const clearTheme = async () => {
@@ -357,6 +413,14 @@ watch(
   },
   { immediate: true }
 )
+
+watch(
+  () => props.currentThemeUrl,
+  (themeUrl) => {
+    customThemeUrl.value = themeUrl || ''
+  },
+  { immediate: true }
+)
 </script>
 
 <style scoped>
@@ -377,6 +441,56 @@ watch(
   border: 1px solid var(--border-color);
   border-radius: 6px;
   background: var(--bg-card);
+}
+
+.theme-custom {
+  padding: 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--bg-card);
+}
+
+.theme-custom-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.theme-custom-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.theme-custom-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.theme-custom-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.theme-custom-form .form-input {
+  flex: 1;
+  min-width: 180px;
+}
+
+@media (max-width: 720px) {
+  .theme-store-toolbar,
+  .theme-custom-form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .theme-custom-form .btn {
+    width: 100%;
+  }
 }
 
 .theme-current {
