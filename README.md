@@ -4,7 +4,7 @@
 
 **演示地址**：<https://demo.huilang.me/>
 
-**当前Workers版本：V2.8.0 Beta; Agent版本：1.3.2**
+**当前Workers版本：V2.8.0 Beta; Agent版本：1.3.3**
 
 > [!IMPORTANT]
 > V2.7.10 加入了 CSP 内容安全策略。Workers 环境通过 HTTP Response Header 下发 CSP，默认只允许同源资源和必要的 Cloudflare/Google Fonts 资源；
