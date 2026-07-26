@@ -1,13 +1,16 @@
 import { loadSettings, DEFAULT_SITE_TITLE } from '../utils/settings.js';
-import { parseCspOrigins, buildApiDomainsWithWs, rebuildCsp, buildBackgroundStyle } from '../utils/csp.js';
+import {
+  parseCspOrigins,
+  buildApiDomainsWithWs,
+  buildCspHeader,
+  buildBackgroundStyle,
+  stripCspMeta
+} from '../utils/csp.js';
 import { checkAuth } from '../middleware/auth.js';
 
 const THEME_CACHE_TTL = 3600;
 const PREVIEW_COOKIE = 'cfsm_theme_preview';
 const PREVIEW_AUTH_COOKIE = 'cfsm_theme_preview_auth';
-const DEFAULT_CSP = "default-src 'self';script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.cloudflareinsights.com;style-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://fonts.googleapis.com;img-src 'self' https://challenges.cloudflare.com https://raw.githubusercontent.com data:;font-src 'self' https://challenges.cloudflare.com https://fonts.gstatic.com;connect-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com;frame-src https://challenges.cloudflare.com;form-action 'self';object-src 'none';base-uri 'self'";
-const CSP_META_TAG_RE = /<meta\b(?=[^>]*http-equiv=["']Content-Security-Policy["'])[^>]*>/i;
-const CSP_META_TAG_RE_GLOBAL = /<meta\b(?=[^>]*http-equiv=["']Content-Security-Policy["'])[^>]*>\s*/gi;
 
 let filesCache = null;
 
@@ -59,24 +62,6 @@ function insertBeforeHeadClose(html, content) {
   return `${content}\n${html}`;
 }
 
-function ensureCspMeta(html) {
-  if (CSP_META_TAG_RE.test(html)) return html;
-  return insertBeforeHeadClose(
-    html,
-    `<meta http-equiv="Content-Security-Policy" content="${DEFAULT_CSP}">`
-  );
-}
-
-function extractCspHeader(html) {
-  const tag = html.match(CSP_META_TAG_RE)?.[0] || '';
-  const content = tag.match(/\bcontent=(["'])(.*?)\1/i)?.[2];
-  return content || DEFAULT_CSP;
-}
-
-function stripCspMeta(html) {
-  return html.replace(CSP_META_TAG_RE_GLOBAL, '');
-}
-
 function injectTitle(html, title) {
   const safeTitle = escapeHtml(title || DEFAULT_SITE_TITLE);
   if (/<title>.*?<\/title>/is.test(html)) {
@@ -86,7 +71,7 @@ function injectTitle(html, title) {
 }
 
 function injectAppearanceSettings(html, settings) {
-  let modifiedHtml = ensureCspMeta(html);
+  let modifiedHtml = stripCspMeta(html);
 
   modifiedHtml = injectTitle(modifiedHtml, settings.site_title || DEFAULT_SITE_TITLE);
 
@@ -95,10 +80,7 @@ function injectAppearanceSettings(html, settings) {
   const staticDomains = parseCspOrigins(cspStatic);
   const rawApiDomains = parseCspOrigins(cspApi);
   const apiDomains = buildApiDomainsWithWs(rawApiDomains);
-
-  if (staticDomains.length > 0 || apiDomains.length > 0) {
-    modifiedHtml = rebuildCsp(modifiedHtml, { staticDomains, apiDomains });
-  }
+  const csp = buildCspHeader({ staticDomains, apiDomains });
 
   if (settings.custom_head) {
     modifiedHtml = insertBeforeHeadClose(modifiedHtml, settings.custom_head);
@@ -116,9 +98,8 @@ function injectAppearanceSettings(html, settings) {
     modifiedHtml = insertBeforeHeadClose(modifiedHtml, buildBackgroundStyle(settings.custom_bg));
   }
 
-  const csp = extractCspHeader(modifiedHtml);
   return {
-    html: stripCspMeta(modifiedHtml),
+    html: modifiedHtml,
     csp
   };
 }
@@ -184,7 +165,8 @@ function parseThemeUrl(themeUrl) {
 
   return {
     themeUrl: normalized,
-    rawBase: `https://raw.githubusercontent.com/huilang-me/CFSM-Theme-Store/${ref}/${encodedThemePath}`
+    rawBase: `https://raw.githubusercontent.com/huilang-me/CFSM-Theme-Store/${ref}/${encodedThemePath}`,
+    cacheBase: `https://cfsm-theme-cache.local/${ref}/${encodedThemePath}`
   };
 }
 
@@ -264,14 +246,28 @@ function normalizeThemeAssetUrls(html) {
   return html.replace(/\b(src|href)=(["'])\.?\/?assets\//gi, '$1=$2/assets/');
 }
 
-async function fetchWithCache(rawUrl, contentType) {
-  const cacheKey = new Request(rawUrl, { method: 'GET' });
+function stripBrowserCacheHeaders(response) {
+  const headers = new Headers(response.headers);
+  headers.delete('Cache-Control');
+  headers.delete('CDN-Cache-Control');
+  headers.delete('Pragma');
+  headers.delete('Expires');
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers
+  });
+}
+
+async function fetchWithCache(rawUrl, contentType, workerCacheUrl) {
+  const cacheKey = new Request(workerCacheUrl || rawUrl, { method: 'GET' });
   const cache = typeof caches !== 'undefined' ? caches.default : null;
 
   if (cache) {
     const cached = await cache.match(cacheKey);
     if (cached) {
-      return cached;
+      return stripBrowserCacheHeaders(cached);
     }
   }
 
@@ -304,7 +300,7 @@ async function fetchWithCache(rawUrl, contentType) {
     await cache.put(cacheKey, response.clone()).catch(() => {});
   }
 
-  return response;
+  return stripBrowserCacheHeaders(response);
 }
 
 async function serveThemeAsset(request, themeUrl) {
@@ -322,12 +318,15 @@ async function serveThemeAsset(request, themeUrl) {
     });
   }
 
+  const contentType = getContentType(assetPath);
   const response = await fetchWithCache(
     `${parsedTheme.rawBase}/assets/${assetPath}`,
-    getContentType(assetPath)
+    contentType,
+    `${parsedTheme.cacheBase}/assets/${assetPath}`
   );
   const headers = new Headers(response.headers);
   headers.set('X-CFSM-Theme-Asset', '1');
+
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
@@ -341,7 +340,8 @@ async function loadThemeIndex(themeUrl) {
 
   const response = await fetchWithCache(
     `${parsedTheme.rawBase}/index.html`,
-    'text/html;charset=UTF-8'
+    'text/html;charset=UTF-8',
+    `${parsedTheme.cacheBase}/index.html`
   );
 
   if (!response.ok) return null;
@@ -352,11 +352,8 @@ function buildHtmlResponse(html, settings, request, previewThemeUrl = '') {
   const rendered = injectAppearanceSettings(html, settings);
   const headers = new Headers({
     'Content-Type': 'text/html;charset=UTF-8',
-    'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-    'Pragma': 'no-cache',
-    'Expires': '0',
-    'CDN-Cache-Control': 'no-store',
     'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
     'Content-Security-Policy': rendered.csp
   });
 
@@ -374,22 +371,25 @@ function buildThemeIndexErrorResponse() {
     status: 502,
     headers: {
       'Content-Type': 'text/plain;charset=UTF-8',
-      'Cache-Control': 'no-store',
       'X-Content-Type-Options': 'nosniff'
     }
   });
 }
 
-function buildPreviewUnauthorizedResponse(request) {
+function buildPreviewUnauthorizedResponse(request, isAsset = false) {
+  const headers = new Headers({
+    'Content-Type': 'text/plain;charset=UTF-8',
+    'X-Content-Type-Options': 'nosniff',
+    'Set-Cookie': buildClearPreviewCookie(request)
+  });
+
+  if (isAsset) {
+    headers.set('X-CFSM-Theme-Asset', '1');
+  }
+
   return new Response('Theme preview requires admin login', {
     status: 401,
-    headers: {
-      'Content-Type': 'text/plain;charset=UTF-8',
-      'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff',
-      'X-CFSM-Theme-Asset': '1',
-      'Set-Cookie': buildClearPreviewCookie(request)
-    }
+    headers
   });
 }
 
@@ -432,7 +432,7 @@ export async function serveFrontend(request, env, settings = null) {
       });
     }
     if (resolvedTheme.preview && !await checkPreviewAuth(request, env, settings)) {
-      return buildPreviewUnauthorizedResponse(request);
+      return buildPreviewUnauthorizedResponse(request, true);
     }
     return serveThemeAsset(request, resolvedTheme.themeUrl);
   }

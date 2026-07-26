@@ -211,10 +211,15 @@ const isAdminPath = () => {
 const bridgeAdminPathToHashRoute = () => {
   if (!isAdminPath()) return
   const hash = window.location.hash || ''
-  if (hash.startsWith('#admin')) return
 
-  const legacyHashSuffix = hash.startsWith('#/admin') ? hash.slice('#/admin'.length) : ''
+  const legacyHashSuffix = hash.startsWith('#/admin')
+    ? hash.slice('#/admin'.length)
+    : hash.startsWith('#admin')
+      ? hash.slice('#admin'.length)
+      : ''
   const adminHash = `#admin${legacyHashSuffix || window.location.search || ''}`
+  if (hash === adminHash) return
+
   window.history.replaceState(null, '', `/admin${adminHash}`)
 }
 

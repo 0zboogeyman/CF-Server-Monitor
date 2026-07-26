@@ -211,12 +211,6 @@ export default {
       try {
         const themeAssetResponse = await serveFrontend(request, env, await loadSettings(env.DB));
         if (themeAssetResponse.headers.get('X-CFSM-Theme-Asset') === '1') {
-          if (!themeAssetResponse.ok) {
-            const staticAssetResponse = await fetchStaticAsset(request, env, path);
-            if (staticAssetResponse) {
-              return applyCors(staticAssetResponse, request, corsAllowedOrigins);
-            }
-          }
           return applyCors(cleanThemeAssetResponse(themeAssetResponse), request, corsAllowedOrigins);
         }
       } catch (e) {
