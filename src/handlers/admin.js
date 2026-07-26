@@ -70,6 +70,7 @@ function normalizeCspOrigin(value) {
 function normalizePingNodeFields(source, fields = PING_NODE_FIELDS) {
   const values = {};
   for (const field of fields) {
+    if (source?.[field] === undefined) continue;
     const result = validatePingNode(source?.[field]);
     if (!result.valid) {
       return { valid: false, field };
@@ -77,6 +78,35 @@ function normalizePingNodeFields(source, fields = PING_NODE_FIELDS) {
     values[field] = result.value;
   }
   return { valid: true, values };
+}
+
+function normalizeThemeUrl(value) {
+  if (value === undefined) return undefined;
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'https:') return null;
+    if (url.hostname !== 'github.com') return null;
+    if (url.username || url.password || url.search || url.hash) return null;
+
+    const parts = url.pathname.split('/').filter(Boolean);
+    if (
+      parts.length < 6 ||
+      parts[0] !== 'huilang-me' ||
+      parts[1] !== 'CFSM-Theme-Store' ||
+      parts[2] !== 'tree' ||
+      !/^[0-9a-f]{40}$/i.test(parts[3]) ||
+      parts.some(part => part === '.' || part === '..')
+    ) {
+      return null;
+    }
+
+    return `https://github.com/${parts.join('/')}`;
+  } catch (_) {
+    return null;
+  }
 }
 
 async function deleteServer(db, id) {
@@ -379,6 +409,10 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
     }
     else if (data.action === 'save_settings') {
       const settings = data.settings || {};
+      const normalizedThemeUrl = normalizeThemeUrl(settings.theme_url);
+      if (normalizedThemeUrl === null) {
+        return createBadRequestResponse('invalidThemeUrl');
+      }
 
       // 如果 turnstile_enabled 或 turnstile_login_enabled 开启，验证 turnstile_site_key 和 turnstile_secret_key 都不为空
       if (settings.turnstile_enabled === 'true' || settings.turnstile_enabled === true || settings.turnstile_login_enabled === 'true' || settings.turnstile_login_enabled === true) {
@@ -447,6 +481,8 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
             siteOptions[field] = pingNodes.values[field];
           } else if (field === 'tg_notify') {
             siteOptions[field] = tgNotify;
+          } else if (field === 'theme_url') {
+            siteOptions[field] = normalizedThemeUrl;
           } else {
             siteOptions[field] = settings[field];
           }

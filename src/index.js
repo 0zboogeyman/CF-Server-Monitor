@@ -156,6 +156,23 @@ export default {
       return createOptionsResponse(request, corsAllowedOrigins);
     }
 
+    if (method === 'GET' && path.startsWith('/assets/')) {
+      try {
+        const themeAssetResponse = await serveFrontend(request, env, await loadSettings(env.DB));
+        if (themeAssetResponse.headers.get('X-CFSM-Theme-Asset') === '1') {
+          const headers = new Headers(themeAssetResponse.headers);
+          headers.delete('X-CFSM-Theme-Asset');
+          const cleanThemeAssetResponse = new Response(themeAssetResponse.body, {
+            status: themeAssetResponse.status,
+            statusText: themeAssetResponse.statusText,
+            headers
+          });
+          return applyCors(cleanThemeAssetResponse, request, corsAllowedOrigins);
+        }
+      } catch (e) {
+      }
+    }
+
     if (env.ASSETS && method === 'GET') {
       try {
         const res = await env.ASSETS.fetch(new Request(`http://static${path}`, request));
@@ -351,8 +368,8 @@ export default {
       }
     }
 
-    const appearanceOptions = await loadAppearanceOptions(env.DB);
-    const frontendResponse = await serveFrontend(request, env, appearanceOptions);
+    const fullSettings = await loadSettings(env.DB);
+    const frontendResponse = await serveFrontend(request, env, fullSettings);
     return applyCors(frontendResponse, request, corsAllowedOrigins);
   },
 

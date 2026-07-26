@@ -94,7 +94,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': createWorkerProxy(),
-      '/admin': createWorkerProxy(),
+      '/admin/api': createWorkerProxy(),
       '/theme': createWorkerProxy(),
       '/update': createWorkerProxy(),
       '/updateDatabase': createWorkerProxy(),

@@ -155,6 +155,9 @@
         <ThemeStorePanel
           :trans="trans"
           :active-tab="activeTab"
+          :selected-api-index="selectedApiIndex"
+          :current-theme-url="settings.theme_url"
+          @theme-applied="settings.theme_url = $event"
         />
       </div>
 
@@ -591,6 +594,7 @@ const settings = ref({
   custom_cu: '',
   custom_cm: '',
   custom_bd: '',
+  theme_url: '',
   csp_static: '',
   csp_api: ''
 })
@@ -908,6 +912,7 @@ const loadSettings = async () => {
         custom_cu: settingsData.custom_cu || '',
         custom_cm: settingsData.custom_cm || '',
         custom_bd: settingsData.custom_bd || '',
+        theme_url: settingsData.theme_url || '',
         csp_static: settingsData.csp_static || '',
         csp_api: settingsData.csp_api || ''
       }

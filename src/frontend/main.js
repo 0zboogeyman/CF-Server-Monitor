@@ -204,14 +204,27 @@ const renderStartupTurnstile = async (siteKey, apiIndex) => {
   }
 }
 
+const isAdminPath = () => {
+  return window.location.pathname === '/admin' || window.location.pathname.startsWith('/admin/')
+}
+
+const bridgeAdminPathToHashRoute = () => {
+  if (!isAdminPath()) return
+  if ((window.location.hash || '').startsWith('#/admin')) return
+
+  const adminHash = `#/admin${window.location.search || ''}`
+  window.history.replaceState(null, '', `${window.location.pathname}${adminHash}`)
+}
+
 async function initApp() {
+  bridgeAdminPathToHashRoute()
+
   // Load frontend runtime config (apiBase) first so all subsequent
   // HTTP / WebSocket requests go through the configured origin.
   await initConfig()
 
   const isMultipleMode = hasMultipleApiBases()
-  const currentHash = window.location.hash
-  const isAdmin = currentHash.startsWith('#/admin')
+  const isAdmin = isAdminPath() || (window.location.hash || '').startsWith('#/admin')
 
   // 多站模式公开页面：一次 getAll 获取所有站点配置，检查 Turnstile key 是否可共享。
   let config

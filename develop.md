@@ -41,6 +41,7 @@
 - 后端是 Cloudflare Worker + D1 数据库
 - 前端通过 `index.html` 中的 meta 运行时配置获取 API 地址，支持多后端聚合
 - 路由使用 **Hash 模式**（`/#/`、`/#/server/:id`、`/#/admin`）
+- Worker 会让 `/admin` 回落到内置前端入口，并桥接到后台 hash 路由
 
 ---
 
@@ -287,7 +288,7 @@ WebSocket 收到 `batchUpdate` 消息后，数据**不是立即应用**，而是
 ### 5.1 初始化流程
 
 ```
-页面挂载（URL: /#/admin）
+页面挂载（URL: /#/admin，或直接访问 /admin）
 │
 ├─ 多站模式 → 显示禁用页面，列出各站点管理链接 → 结束
 │
@@ -614,7 +615,7 @@ getFlagRegionCode(region):
 |------|------|------|
 | `/#/` 或 `/#` | Dashboard | 首页，服务器列表 |
 | `/#/server/:id` | ServerDetail | 服务器详情，含图表 |
-| `/#/admin` | Admin | 管理面板（登录/设置） |
+| `/#/admin` 或 `/admin` | Admin | 管理面板（登录/设置） |
 
 查询参数：
 - `?apiIndex=N`：多站模式下指定使用第 N 个 apiBase（从 0 开始）
