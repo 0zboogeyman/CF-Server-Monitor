@@ -1105,12 +1105,14 @@ while true; do
     SWAP_USED=$(((SWAP_TOTAL_KB - SWAP_FREE_KB) / 1024))
     [ "${SWAP_USED}" -lt 0 ] && SWAP_USED=0
 
-    # 统计所有数据分区的总容量和使用量（排除引导、光驱、Snap等）
+    # 统计本地数据分区的总容量和使用量（排除引导、光驱、Snap、NAS/NFS等远端挂载）
     DISK_TOTAL=0; DISK_USED=0
     DISK_STATS=$(df -kP 2>/dev/null | awk '
         NR>1 &&
         $6 !~ /^(\/boot|\/boot\/efi|\/snap|\/var\/snap)/ &&
         $1 !~ /^(tmpfs|devtmpfs|overlay|squashfs|none)$/ &&
+        $1 !~ /^\/dev\/loop/ &&
+        $1 ~ /^\/dev\// &&
         $6 !~ /^(\/proc|\/sys|\/dev|\/run)$/ &&
         $2 ~ /^[0-9]/ &&
         $2 + 0 > 0 {
