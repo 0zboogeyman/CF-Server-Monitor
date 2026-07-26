@@ -726,9 +726,10 @@ ws.onmessage = (ev) => {
 
 ```text
 https://github.com/huilang-me/CFSM-Theme-Store/tree/dist/<作者>/<主题目录>/<版本号>
+https://github.com/<owner>/<theme-repo>/tree/<commit-or-branch>[/theme-subdir]
 ```
 
-旧版 40 位 commit ref 地址仍兼容，但主题商店默认保存 `dist` 分支地址。
+主题商店列表默认保存 `CFSM-Theme-Store` 的 `dist` 分支地址；手动填写时也可以使用独立 GitHub 主题仓库的 tree 地址。建议使用 commit id 固定版本。
 
 **反代规则**：
 
@@ -980,7 +981,7 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled === 
 **特殊处理**：
 
 - `password`：以**明文**传入；后端用 PBKDF2-HMAC-SHA-256（50,000 iterations、16 字节 salt、32 字节 hash）计算后保存为 `pbkdf2_sha256$50000$<salt hex>$<hash hex>`；如传空字符串则**不更新**密码；旧版 32 位 MD5 哈希仍可登录并会在成功登录后自动升级
-- `theme_url`：可单独通过 `{"settings":{"theme_url":"..."}}` 保存；只允许 `https://github.com/huilang-me/CFSM-Theme-Store/tree/dist/...` 或兼容的 40 位 commit ref 地址；保存前会请求对应 raw `index.html` 验证可用性，失败返回 `400 invalidThemeUrl`，不会保存
+- `theme_url`：可单独通过 `{"settings":{"theme_url":"..."}}` 保存；允许 `https://github.com/<owner>/<repo>/tree/<commit-or-branch>[/theme-subdir]` 格式。保存前会请求对应 raw `index.html` 验证可用性，失败返回 `400 invalidThemeUrl`，不会保存
 - Ping 节点字段：仅校验本次请求中出现的 `custom_ct/custom_cu/custom_cm/custom_bd` 字段，因此只保存 `theme_url` 不会触发 Ping 节点格式校验
 
 **Response 200**
