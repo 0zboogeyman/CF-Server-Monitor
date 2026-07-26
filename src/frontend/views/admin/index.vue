@@ -108,6 +108,7 @@
           :groups="groups"
           :active-tab="activeTab"
           :selected-api-index="selectedApiIndex"
+          :theme-url="settings.theme_url"
           :latest-agent-version="latestAgentVersion"
           :copied-server-id="copiedServerId"
           :copied-note-server-id="copiedNoteServerId"
@@ -791,6 +792,10 @@ const handleLogin = async () => {
 }
 
 const logout = async () => {
+  try {
+    await adminApiForSite({ action: 'clear_theme_preview_auth' })
+  } catch (_) {
+  }
   apiLogout()
   isLoggedIn.value = false
   latestAgentVersion.value = ''

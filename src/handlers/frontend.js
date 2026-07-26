@@ -1,8 +1,10 @@
 import { loadSettings, DEFAULT_SITE_TITLE } from '../utils/settings.js';
 import { parseCspOrigins, buildApiDomainsWithWs, rebuildCsp, buildBackgroundStyle } from '../utils/csp.js';
+import { checkAuth } from '../middleware/auth.js';
 
 const THEME_CACHE_TTL = 3600;
 const PREVIEW_COOKIE = 'cfsm_theme_preview';
+const PREVIEW_AUTH_COOKIE = 'cfsm_theme_preview_auth';
 const DEFAULT_CSP = "default-src 'self';script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://static.cloudflareinsights.com;style-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://fonts.googleapis.com;img-src 'self' https://challenges.cloudflare.com https://raw.githubusercontent.com data:;font-src 'self' https://challenges.cloudflare.com https://fonts.gstatic.com;connect-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com;frame-src https://challenges.cloudflare.com;form-action 'self';object-src 'none';base-uri 'self'";
 const CSP_META_TAG_RE = /<meta\b(?=[^>]*http-equiv=["']Content-Security-Policy["'])[^>]*>/i;
 const CSP_META_TAG_RE_GLOBAL = /<meta\b(?=[^>]*http-equiv=["']Content-Security-Policy["'])[^>]*>\s*/gi;
@@ -217,6 +219,27 @@ function buildClearPreviewCookie(request) {
   return `${PREVIEW_COOKIE}=; Max-Age=0; Path=/; SameSite=Lax${secure}`;
 }
 
+async function checkPreviewAuth(request, env, settings) {
+  const token = getCookie(request, PREVIEW_AUTH_COOKIE);
+  if (!token) return false;
+
+  try {
+    const authRequest = {
+      headers: {
+        get: (key) => {
+          if (String(key).toLowerCase() === 'authorization') {
+            return `Bearer ${decodeURIComponent(token)}`;
+          }
+          return request.headers.get(key);
+        }
+      }
+    };
+    return await checkAuth(authRequest, env, settings);
+  } catch (_) {
+    return false;
+  }
+}
+
 function getPreviewThemeUrlFromQuery(url) {
   if (!url.searchParams.has('theme_url')) return '';
   return normalizeThemeUrl(url.searchParams.get('theme_url'));
@@ -346,13 +369,46 @@ function buildHtmlResponse(html, settings, request, previewThemeUrl = '') {
   return new Response(rendered.html, { headers });
 }
 
+function buildThemeIndexErrorResponse() {
+  return new Response('Theme index.html is unavailable', {
+    status: 502,
+    headers: {
+      'Content-Type': 'text/plain;charset=UTF-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff'
+    }
+  });
+}
+
+function buildPreviewUnauthorizedResponse(request) {
+  return new Response('Theme preview requires admin login', {
+    status: 401,
+    headers: {
+      'Content-Type': 'text/plain;charset=UTF-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'X-CFSM-Theme-Asset': '1',
+      'Set-Cookie': buildClearPreviewCookie(request)
+    }
+  });
+}
+
 function resolveThemeUrlForAsset(request, settings) {
   const url = new URL(request.url);
-  return (
-    getPreviewThemeUrlFromQuery(url) ||
-    getPreviewThemeUrlFromCookie(request) ||
-    normalizeThemeUrl(settings?.theme_url)
-  );
+  const queryThemeUrl = getPreviewThemeUrlFromQuery(url);
+  if (queryThemeUrl) {
+    return { themeUrl: queryThemeUrl, preview: true };
+  }
+
+  const cookieThemeUrl = getPreviewThemeUrlFromCookie(request);
+  if (cookieThemeUrl) {
+    return { themeUrl: cookieThemeUrl, preview: true };
+  }
+
+  return {
+    themeUrl: normalizeThemeUrl(settings?.theme_url),
+    preview: false
+  };
 }
 
 function shouldUseBuiltinFrontend(path) {
@@ -368,25 +424,33 @@ export async function serveFrontend(request, env, settings = null) {
   }
 
   if (request.method === 'GET' && path.startsWith('/assets/')) {
-    const themeUrl = resolveThemeUrlForAsset(request, settings);
-    if (!themeUrl) {
+    const resolvedTheme = resolveThemeUrlForAsset(request, settings);
+    if (!resolvedTheme.themeUrl) {
       return new Response('Not Found', {
         status: 404,
         headers: { 'Content-Type': 'text/plain;charset=UTF-8' }
       });
     }
-    return serveThemeAsset(request, themeUrl);
+    if (resolvedTheme.preview && !await checkPreviewAuth(request, env, settings)) {
+      return buildPreviewUnauthorizedResponse(request);
+    }
+    return serveThemeAsset(request, resolvedTheme.themeUrl);
   }
 
   const previewThemeUrl = getPreviewThemeUrlFromQuery(url);
   const configuredThemeUrl = normalizeThemeUrl(settings.theme_url);
   const effectiveThemeUrl = previewThemeUrl || configuredThemeUrl;
 
+  if (previewThemeUrl && !await checkPreviewAuth(request, env, settings)) {
+    return buildPreviewUnauthorizedResponse(request);
+  }
+
   if (!shouldUseBuiltinFrontend(path) && effectiveThemeUrl) {
     const themeHtml = await loadThemeIndex(effectiveThemeUrl);
     if (themeHtml) {
       return buildHtmlResponse(themeHtml, settings, request, previewThemeUrl);
     }
+    return buildThemeIndexErrorResponse();
   }
 
   const files = await loadFrontendFiles(env);

@@ -210,10 +210,12 @@ const isAdminPath = () => {
 
 const bridgeAdminPathToHashRoute = () => {
   if (!isAdminPath()) return
-  if ((window.location.hash || '').startsWith('#/admin')) return
+  const hash = window.location.hash || ''
+  if (hash.startsWith('#admin')) return
 
-  const adminHash = `#/admin${window.location.search || ''}`
-  window.history.replaceState(null, '', `${window.location.pathname}${adminHash}`)
+  const legacyHashSuffix = hash.startsWith('#/admin') ? hash.slice('#/admin'.length) : ''
+  const adminHash = `#admin${legacyHashSuffix || window.location.search || ''}`
+  window.history.replaceState(null, '', `/admin${adminHash}`)
 }
 
 async function initApp() {
@@ -224,7 +226,8 @@ async function initApp() {
   await initConfig()
 
   const isMultipleMode = hasMultipleApiBases()
-  const isAdmin = isAdminPath() || (window.location.hash || '').startsWith('#/admin')
+  const currentHash = window.location.hash || ''
+  const isAdmin = isAdminPath() || currentHash.startsWith('#admin') || currentHash.startsWith('#/admin')
 
   // 多站模式公开页面：一次 getAll 获取所有站点配置，检查 Turnstile key 是否可共享。
   let config
@@ -286,7 +289,7 @@ async function initApp() {
   app.use(router)
   app.mount('#app').$nextTick(() => {
     if (!isAdmin && !config.is_public && !config.authorization) {
-      router.push('/admin')
+      window.location.replace('/admin#admin')
     }
     const loading = document.getElementById('loading')
     if (loading) {

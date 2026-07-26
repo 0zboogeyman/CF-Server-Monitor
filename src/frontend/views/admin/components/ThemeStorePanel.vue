@@ -90,16 +90,15 @@
               <button
                 @click="previewTheme(theme)"
                 class="btn btn-sm"
-                :disabled="!getSelectedThemeUrl(theme)"
+                :disabled="!getSelectedThemeUrl(theme) || previewingThemeId === theme.id"
                 :title="!getSelectedThemeUrl(theme) ? trans.themeUrlUnavailable : ''"
-              >👁 {{ trans.preview }}</button>
+              >👁 {{ previewingThemeId === theme.id ? trans.saving : trans.preview }}</button>
               <button
                 @click="applyTheme(theme)"
                 class="btn btn-sm btn-primary"
                 :disabled="!getSelectedThemeUrl(theme) || applyingThemeId === theme.id"
                 :title="!getSelectedThemeUrl(theme) ? trans.themeUrlUnavailable : ''"
               >⇄ {{ applyingThemeId === theme.id ? trans.saving : trans.switchTheme }}</button>
-              <a v-if="getSafeExternalUrl(theme.demo)" :href="getSafeExternalUrl(theme.demo)" target="_blank" rel="noopener noreferrer" class="btn btn-sm">▶ {{ trans.demo }}</a>
               <a v-if="getSafeExternalUrl(theme.url)" :href="getSafeExternalUrl(theme.url)" target="_blank" rel="noopener noreferrer" class="btn btn-sm">↗ {{ trans.view }}</a>
             </div>
           </div>
@@ -130,6 +129,7 @@ const loaded = ref(false)
 const error = ref('')
 const notice = ref(null)
 const applyingThemeId = ref('')
+const previewingThemeId = ref('')
 const selectedVersions = reactive({})
 
 const loadThemes = async () => {
@@ -239,16 +239,39 @@ const isCurrentTheme = (theme) => {
   return props.currentThemeUrl && props.currentThemeUrl === getSelectedThemeUrl(theme)
 }
 
-const previewTheme = (theme) => {
+const previewTheme = async (theme) => {
   const themeUrl = getSelectedThemeUrl(theme)
   if (!themeUrl) {
     notice.value = { type: 'error', message: props.trans.themeUrlUnavailable }
     return
   }
 
-  const previewUrl = new URL('/', window.location.origin)
-  previewUrl.searchParams.set('theme_url', themeUrl)
-  window.open(previewUrl.href, '_blank', 'noopener,noreferrer')
+  if (previewingThemeId.value) return
+  previewingThemeId.value = theme.id
+  notice.value = null
+  try {
+    const result = await adminApi({
+      action: 'start_theme_preview',
+      theme_url: themeUrl
+    }, props.selectedApiIndex)
+
+    if (result.error) {
+      notice.value = { type: 'error', message: props.trans[result.error] || result.error || props.trans.themeApplyFailed }
+      return
+    }
+
+    const previewUrl = result.data?.preview_url
+    if (!previewUrl) {
+      notice.value = { type: 'error', message: props.trans.themeApplyFailed }
+      return
+    }
+
+    window.open(previewUrl, '_blank', 'noopener,noreferrer')
+  } catch (e) {
+    notice.value = { type: 'error', message: e.message || props.trans.themeApplyFailed }
+  } finally {
+    previewingThemeId.value = ''
+  }
 }
 
 const saveThemeUrl = async (themeUrl, applyingId) => {
