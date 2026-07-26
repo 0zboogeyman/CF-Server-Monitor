@@ -36,13 +36,39 @@
           <div class="theme-info">
             <div class="theme-header">
               <h3 class="theme-title">{{ theme.title }}</h3>
-              <span v-if="theme.version" class="theme-version">v{{ theme.version }}</span>
+              <span v-if="getLatestVersion(theme)" class="theme-version">{{ getLatestVersion(theme).version }}</span>
             </div>
             <div v-if="theme.tags && theme.tags.length" class="theme-tags">
               <span v-for="tag in theme.tags" :key="tag" class="theme-tag">{{ tag }}</span>
             </div>
             <p v-if="getThemeDescription(theme)" class="theme-desc">{{ getThemeDescription(theme) }}</p>
             <div v-if="theme.author" class="theme-author">by {{ theme.author }}</div>
+            
+            <!-- 版本选择 -->
+            <div v-if="theme.versions && theme.versions.length > 0" class="theme-version-selector">
+              <label class="version-label">{{ trans.version }}</label>
+              <select 
+                :value="selectedVersions[theme.id] || 0" 
+                @change="selectVersion(theme.id, $event.target.value)"
+                class="version-select"
+              >
+                <option v-for="(v, idx) in theme.versions" :key="v.version" :value="idx">
+                  {{ v.version }}
+                </option>
+              </select>
+            </div>
+
+            <!-- 当前选中版本信息 -->
+            <div v-if="getSelectedVersion(theme)" class="theme-version-info">
+              <div v-if="getSelectedVersion(theme).releaseDate" class="version-date">
+                📅 {{ getSelectedVersion(theme).releaseDate }}
+              </div>
+              <div v-if="getSelectedVersion(theme).changelog" class="version-changelog">
+                <div class="changelog-label">{{ trans.changelog }}</div>
+                <div class="changelog-content">{{ getSelectedVersion(theme).changelog }}</div>
+              </div>
+            </div>
+
             <div class="theme-actions">
               <button v-if="theme.preview" @click="openPreview(theme)" class="btn btn-sm">👁 {{ trans.preview }}</button>
               <a v-if="getSafeExternalUrl(theme.demo)" :href="getSafeExternalUrl(theme.demo)" target="_blank" rel="noopener noreferrer" class="btn btn-sm">▶ {{ trans.demo }}</a>
@@ -69,7 +95,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, reactive } from 'vue'
 import http from '../../../utils/http'
 import { currentLang } from '../../../utils/i18n'
 
@@ -83,6 +109,7 @@ const loading = ref(false)
 const loaded = ref(false)
 const error = ref('')
 const previewTheme = ref(null)
+const selectedVersions = reactive({})
 
 const loadThemes = async () => {
   if (loading.value) return
@@ -93,6 +120,14 @@ const loadThemes = async () => {
     const result = await http.get('/theme')
     if (result.error) throw new Error(result.error)
     themes.value = Array.isArray(result.data?.themes) ? result.data.themes : []
+    
+    // 初始化选中版本为最新版本（索引0）
+    themes.value.forEach(theme => {
+      if (theme.versions && theme.versions.length > 0) {
+        selectedVersions[theme.id] = 0
+      }
+    })
+    
     loaded.value = true
   } catch (e) {
     error.value = e.message || 'Failed to load themes'
@@ -104,6 +139,21 @@ const loadThemes = async () => {
 
 const openPreview = (theme) => {
   previewTheme.value = theme
+}
+
+const getLatestVersion = (theme) => {
+  if (!theme.versions || !theme.versions.length) return null
+  return theme.versions[0]
+}
+
+const getSelectedVersion = (theme) => {
+  if (!theme.versions || !theme.versions.length) return null
+  const idx = selectedVersions[theme.id] || 0
+  return theme.versions[idx] || null
+}
+
+const selectVersion = (themeId, idx) => {
+  selectedVersions[themeId] = parseInt(idx)
 }
 
 const getThemeDescription = (theme) => {
@@ -259,6 +309,64 @@ watch(
   color: var(--text-secondary);
   margin-bottom: 10px;
   opacity: 0.7;
+}
+
+.theme-version-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.version-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.version-select {
+  flex: 1;
+  font-size: 11px;
+  padding: 4px 8px;
+  background: var(--bg-secondary, #1a1a2e);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-family: var(--terminal-font);
+  cursor: pointer;
+}
+
+.version-select:focus {
+  outline: none;
+  border-color: var(--accent-green);
+}
+
+.theme-version-info {
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  background: var(--bg-hover, rgba(255,255,255,0.03));
+  border-radius: 3px;
+}
+
+.version-date {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.version-changelog {
+  font-size: 11px;
+}
+
+.changelog-label {
+  color: var(--accent-green);
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.changelog-content {
+  color: var(--text-secondary);
+  line-height: 1.4;
 }
 
 .theme-actions {
