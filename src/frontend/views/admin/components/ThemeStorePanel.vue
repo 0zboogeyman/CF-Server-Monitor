@@ -182,12 +182,13 @@ const normalizeThemeStoreUrl = (value) => {
     if (url.username || url.password || url.search || url.hash) return ''
 
     const parts = url.pathname.split('/').filter(Boolean)
+    const ref = parts[3]
     if (
       parts.length < 6 ||
       parts[0] !== 'huilang-me' ||
       parts[1] !== 'CFSM-Theme-Store' ||
       parts[2] !== 'tree' ||
-      !/^[0-9a-f]{40}$/i.test(parts[3]) ||
+      (ref !== 'dist' && !/^[0-9a-f]{40}$/i.test(ref)) ||
       parts.some(part => part === '.' || part === '..')
     ) {
       return ''
@@ -213,19 +214,6 @@ const getGithubRepoParts = (theme) => {
   }
 }
 
-const getVersionCommit = (version) => {
-  return String(
-    version?.theme_commitid ||
-    version?.themeCommitid ||
-    version?.store_commitid ||
-    version?.storeCommitid ||
-    version?.store_commit ||
-    version?.storeCommit ||
-    version?.commitid ||
-    ''
-  ).trim()
-}
-
 const getVersionThemeUrl = (theme, version) => {
   const directUrl = normalizeThemeStoreUrl(
     version?.theme_url ||
@@ -234,14 +222,13 @@ const getVersionThemeUrl = (theme, version) => {
     version?.storeUrl ||
     ''
   )
-  if (directUrl) return directUrl
+  if (directUrl && directUrl.includes('/tree/dist/')) return directUrl
 
   const repo = getGithubRepoParts(theme)
-  const commit = getVersionCommit(version)
   const versionName = String(version?.version || '').trim()
-  if (!repo || !/^[0-9a-f]{40}$/i.test(commit) || !versionName) return ''
+  if (!repo || !versionName) return ''
 
-  return `https://github.com/huilang-me/CFSM-Theme-Store/tree/${commit}/${repo.owner}/${repo.repo}/${versionName}`
+  return `https://github.com/huilang-me/CFSM-Theme-Store/tree/dist/${repo.owner}/${repo.repo}/${versionName}`
 }
 
 const getSelectedThemeUrl = (theme) => {
@@ -276,7 +263,7 @@ const saveThemeUrl = async (themeUrl, applyingId) => {
     }, props.selectedApiIndex)
 
     if (result.error) {
-      notice.value = { type: 'error', message: props.trans.themeApplyFailed || result.error }
+      notice.value = { type: 'error', message: props.trans[result.error] || result.error || props.trans.themeApplyFailed }
       return
     }
 

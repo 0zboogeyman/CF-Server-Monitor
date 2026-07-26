@@ -152,12 +152,13 @@ function normalizeThemeUrl(value) {
     if (url.username || url.password || url.search || url.hash) return '';
 
     const parts = url.pathname.split('/').filter(Boolean);
+    const ref = parts[3];
     if (
       parts.length < 6 ||
       parts[0] !== 'huilang-me' ||
       parts[1] !== 'CFSM-Theme-Store' ||
       parts[2] !== 'tree' ||
-      !/^[0-9a-f]{40}$/i.test(parts[3]) ||
+      (ref !== 'dist' && !/^[0-9a-f]{40}$/i.test(ref)) ||
       parts.some(part => part === '.' || part === '..')
     ) {
       return '';

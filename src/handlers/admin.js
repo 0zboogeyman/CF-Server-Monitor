@@ -92,12 +92,13 @@ function normalizeThemeUrl(value) {
     if (url.username || url.password || url.search || url.hash) return null;
 
     const parts = url.pathname.split('/').filter(Boolean);
+    const ref = parts[3];
     if (
       parts.length < 6 ||
       parts[0] !== 'huilang-me' ||
       parts[1] !== 'CFSM-Theme-Store' ||
       parts[2] !== 'tree' ||
-      !/^[0-9a-f]{40}$/i.test(parts[3]) ||
+      (ref !== 'dist' && !/^[0-9a-f]{40}$/i.test(ref)) ||
       parts.some(part => part === '.' || part === '..')
     ) {
       return null;
@@ -106,6 +107,34 @@ function normalizeThemeUrl(value) {
     return `https://github.com/${parts.join('/')}`;
   } catch (_) {
     return null;
+  }
+}
+
+function getThemeRawIndexUrl(themeUrl) {
+  const normalized = normalizeThemeUrl(themeUrl);
+  if (!normalized) return '';
+
+  const url = new URL(normalized);
+  const parts = url.pathname.split('/').filter(Boolean);
+  const ref = parts[3];
+  const themePath = parts.slice(4).map(part => encodeURIComponent(part)).join('/');
+  return `https://raw.githubusercontent.com/huilang-me/CFSM-Theme-Store/${ref}/${themePath}/index.html`;
+}
+
+async function validateThemeUrlAvailable(themeUrl) {
+  if (!themeUrl) return true;
+
+  const rawIndexUrl = getThemeRawIndexUrl(themeUrl);
+  if (!rawIndexUrl) return false;
+
+  try {
+    const res = await fetch(rawIndexUrl, {
+      method: 'GET',
+      headers: { 'User-Agent': 'CFSM-Theme-Validate' }
+    });
+    return res.ok;
+  } catch (_) {
+    return false;
   }
 }
 
@@ -411,6 +440,9 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
       const settings = data.settings || {};
       const normalizedThemeUrl = normalizeThemeUrl(settings.theme_url);
       if (normalizedThemeUrl === null) {
+        return createBadRequestResponse('invalidThemeUrl');
+      }
+      if (normalizedThemeUrl && !await validateThemeUrlAvailable(normalizedThemeUrl)) {
         return createBadRequestResponse('invalidThemeUrl');
       }
 
