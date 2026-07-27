@@ -24,7 +24,7 @@ const defaults = {
   custom_script: '',
   csp_static: '',
   csp_api: '',
-  display_mode: 'bar',
+  display_mode: 'ring',
   theme_options: {},
   is_public: 'true',
   show_price: 'true',
