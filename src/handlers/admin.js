@@ -19,6 +19,10 @@ function normalizeBooleanFlag(value) {
   return value === true || value === 1 || value === '1' || value === 'true' ? '1' : '0';
 }
 
+function normalizeServerRegion(value) {
+  return String(value || '').trim().toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 16);
+}
+
 function normalizeServerBillingData(data = {}) {
   const billingCycle = normalizeBillingCycle(data.billing_cycle || detectBillingCycle(data.price));
   const autoRenewal = normalizeBooleanFlag(data.auto_renewal);
@@ -421,7 +425,7 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
       
       const serversWithStatus = servers.map(server => {
         const latestMetrics = latestMetricsMap.get(server.id);
-        const item = { ...server };
+        const item = { ...server, region_override: server.region || '' };
         let isOnline = false;
         
         if (latestMetrics) {
@@ -603,6 +607,7 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
       
       const id = crypto.randomUUID();
       const group = data.server_group || 'Default';
+      const region = normalizeServerRegion(data.region);
 
       const { max_order } = await env.DB.prepare('SELECT COALESCE(MAX(sort_order), -1) as max_order FROM servers').first();
       const sortOrder = (max_order || 0) + 1;
@@ -611,9 +616,9 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
 
       await env.DB.prepare(`
         INSERT INTO servers
-        (id, name, server_group, sort_order, history_partition_id, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).bind(id, name, group, sortOrder, historyPartitionId, Date.now()).run();
+        (id, name, server_group, region, sort_order, history_partition_id, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).bind(id, name, group, region, sortOrder, historyPartitionId, Date.now()).run();
       
       clearServersListCache();
       
@@ -659,7 +664,7 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
       });
     }
     else if (data.action === 'edit') {
-      const { id, name, server_group, tags, note, price, billing_cycle, auto_renewal, currency, expire_date, traffic_limit, traffic_calc_type, reset_day, collect_interval, report_interval, auto_update, custom_ct, custom_cu, custom_cm, custom_bd, rx_correction, tx_correction, offline_notify_disabled, is_hidden } = data;
+      const { id, name, server_group, region, tags, note, price, billing_cycle, auto_renewal, currency, expire_date, traffic_limit, traffic_calc_type, reset_day, collect_interval, report_interval, auto_update, custom_ct, custom_cu, custom_cm, custom_bd, rx_correction, tx_correction, offline_notify_disabled, is_hidden } = data;
       if (!id || !isValidUUID(id)) {
         return createBadRequestResponse('invalidServerId');
       }
@@ -706,11 +711,12 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
       try {
         await env.DB.prepare(`
           UPDATE servers
-          SET name = ?, server_group = ?, tags = ?, note = ?, price = ?, billing_cycle = ?, auto_renewal = ?, currency = ?, expire_date = ?, traffic_limit = ?, traffic_calc_type = ?, reset_day = ?, collect_interval = ?, report_interval = ?, auto_update = ?, custom_ct = ?, custom_cu = ?, custom_cm = ?, custom_bd = ?, rx_correction = ?, tx_correction = ?, offline_notify_disabled = ?, is_hidden = ?
+          SET name = ?, server_group = ?, region = ?, tags = ?, note = ?, price = ?, billing_cycle = ?, auto_renewal = ?, currency = ?, expire_date = ?, traffic_limit = ?, traffic_calc_type = ?, reset_day = ?, collect_interval = ?, report_interval = ?, auto_update = ?, custom_ct = ?, custom_cu = ?, custom_cm = ?, custom_bd = ?, rx_correction = ?, tx_correction = ?, offline_notify_disabled = ?, is_hidden = ?
           WHERE id = ?
         `).bind(
           name || '',
           server_group || 'Default',
+          normalizeServerRegion(region),
           safeTags,
           safeNote,
           billingData.price,
@@ -842,16 +848,17 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
 
         try {
           await env.DB.prepare(`
-            INSERT INTO servers (id, name, server_group, tags, note, price, billing_cycle, auto_renewal,
+            INSERT INTO servers (id, name, server_group, region, tags, note, price, billing_cycle, auto_renewal,
               currency, expire_date,
               traffic_limit, traffic_calc_type, reset_day, collect_interval, report_interval,
               auto_update, custom_ct, custom_cu, custom_cm, custom_bd, rx_correction, tx_correction,
               offline_notify_disabled, is_hidden, sort_order, history_partition_id, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).bind(
             server.id,
             server.name || '',
             server.server_group || 'Default',
+            normalizeServerRegion(server.region),
             server.tags || '',
             server.note || '',
             billingData.price,

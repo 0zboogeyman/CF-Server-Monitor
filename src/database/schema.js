@@ -36,6 +36,7 @@ export async function initDatabase(db) {
           id TEXT PRIMARY KEY,
           name TEXT,
           server_group TEXT DEFAULT 'Default',
+          region TEXT DEFAULT '',
           tags TEXT DEFAULT '',
           note TEXT DEFAULT '',
           price TEXT DEFAULT '',

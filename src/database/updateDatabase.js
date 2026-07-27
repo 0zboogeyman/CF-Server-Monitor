@@ -124,6 +124,7 @@ export async function addServerColumns(db) {
       is_hidden: "TEXT DEFAULT '0'",
       offline_notify_disabled: "TEXT DEFAULT '0'",
       sort_order: "INTEGER DEFAULT 0",
+      region: "TEXT DEFAULT ''",
       tags: "TEXT DEFAULT ''",
       note: "TEXT DEFAULT ''",
       billing_cycle: "TEXT DEFAULT 'month'",

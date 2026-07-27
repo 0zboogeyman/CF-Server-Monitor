@@ -24,6 +24,13 @@
         </div>
       </div>
 
+      <div class="form-row">
+        <div class="form-group flex-1">
+          <label class="form-label">{{ trans.region }}</label>
+          <input type="text" name="edit_region" autocomplete="off" v-model.trim="editForm.region" class="form-input" placeholder="e.g. HK">
+        </div>
+      </div>
+
       <div class="form-group">
         <label class="form-label">{{ trans.note }}</label>
         <textarea name="edit_note" autocomplete="off" v-model="editForm.note" class="form-textarea" rows="2" :placeholder="trans.notePlaceholder"></textarea>
