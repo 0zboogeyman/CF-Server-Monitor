@@ -1,6 +1,6 @@
 #!/bin/sh
 # ==============================================================================
-# V1.3.3
+# V1.3.4
 # CF-Server-Monitor 安装/卸载脚本 (Alpine Linux 兼容版)
 # 支持: Alpine Linux (OpenRC / 裸机 / Docker 容器)
 # Fixes: 1. 独立协程无 wait 阻塞 2. 原子化原子覆盖 3. 兼容 OpenRC/无 init 场景
@@ -10,7 +10,7 @@
 
 set -eu
 
-AGENT_VERSION="1.3.3"
+AGENT_VERSION="1.3.4"
 
 # 路径定义（配置文件系统）
 CONFIG_DIR="/etc/config/cf-probe"

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# V1.3.3
+# V1.3.4
 # CF-Server-Monitor 安装/卸载脚本 (Synology 群晖专用版)
 # 支持: Synology DSM 6.x / 7.x (BusyBox 环境适配)
 # 与 install.sh 功能一致，针对群晖系统做了路径、服务管理、命令兼容性适配
@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.3.3"
+AGENT_VERSION="1.3.4"
 
 # 颜色定义
 RED='\033[0;31m'

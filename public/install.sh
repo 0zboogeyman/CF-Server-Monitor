@@ -1,6 +1,6 @@
 #!/bin/bash
 # ==============================================================================
-# V1.3.3
+# V1.3.4
 # CF-Server-Monitor 安装/卸载脚本 (企业级安全加固版)
 # 支持: Ubuntu/Debian/CentOS/RHEL/Fedora/Rocky/AlmaLinux
 # Fixes: 1. 独立协程无 wait 阻塞 2. 原子化原子覆盖 3. 兼容全版本 Systemd 4. 严格 set -u 闭环
@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.3.3"
+AGENT_VERSION="1.3.4"
 
 # 颜色定义
 RED='\033[0;31m'
