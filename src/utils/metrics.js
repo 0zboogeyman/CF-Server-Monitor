@@ -56,6 +56,7 @@ export function mergeMetricsIntoServer(server, metrics) {
   server.gpu_info = metrics.gpu_info || '';
   server.arch = metrics.arch || '';
   server.os = metrics.os || '';
+  server.kernel_version = metrics.kernel_version || '';
   server.agent_version = metrics.agent_version || '';
   server.region = metrics.region || '';
   server.ip_v4 = metrics.ip_v4 || '0';

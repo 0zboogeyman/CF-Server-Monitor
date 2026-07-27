@@ -249,6 +249,7 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
       "net_out_speed": "512",
       "os": "Ubuntu 22.04",
       "arch": "x86_64",
+      "kernel_version": "6.8.0-36-generic",
       "cpu_info": "Intel(R) Xeon(R) CPU",
       "cpu_cores": "4",
       "gpu_info": [
@@ -310,10 +311,11 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
 | `net_out_speed`  | string\|number | B/s | 是  | 实时上行速度                                      |
 | `os`             | string       | -   | 是  | 操作系统                                        |
 | `arch`           | string       | -   | 是  | 系统架构                                        |
+| `kernel_version` | string       | -   | 是  | 内核版本                                      |
 | `cpu_info`       | string       | -   | 是  | CPU 型号                                      |
 | `cpu_cores`      | string\|number | -   | 是  | 逻辑核心数                                       |
-| ~~`gpu`~~        | number\|null | %   | 否  | ~~独立 GPU 占用字段。~~ **2026-07-26 修订**：旧版 Windows 探针仍可能发送，但后端没有独立 `gpu` 列，不会持久化或返回该字段 |
-| `gpu_info`       | array\|string\|null | - | 否 | 新版格式为 `[{id,name,info}]`；`info` 是占用率。后端也兼容旧版字符串并在入库时序列化数组 |
+| ~~`gpu`~~        | number\|null | %   | 否  | ~~独立 GPU 占用字段。~~ **2026-07-26 修订**：旧版探针仍可能发送，但后端没有独立 `gpu` 列，不会持久化，也不会在 API 中返回 |
+| `gpu_info`       | array\|null | - | 否 | 新版格式为 `[{id,name,info}]`；`info` 是占用率。无 GPU 时可为 `null`，入库后会序列化为 JSON 字符串 |
 | `processes`      | string\|number | -   | 是  | 进程数                                         |
 | `tcp_conn`       | string\|number | -   | 是  | TCP 活跃连接数                                   |
 | `udp_conn`       | string\|number | -   | 是  | UDP 套接字数                                    |
@@ -530,6 +532,7 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
   "gpu_info": "[{\"id\":\"0\",\"name\":\"NVIDIA GeForce RTX 3060\",\"info\":12.5}]",
   "arch": "x86_64",
   "os": "Ubuntu 22.04",
+  "kernel_version": "6.8.0-36-generic",
   "region": "HK",
   "ip_v4": "1",
   "ip_v6": "1",
@@ -1486,10 +1489,10 @@ UUID 缺失或格式非法时返回 `400 { "error": "invalidServerId", "code": 4
 | `disk_total` / `disk_used`                    | number             | MB                        |
 | `cpu_cores`                                   | number             | 逻辑核心数                     |
 | `cpu_info`                                    | string             | CPU 型号                    |
-| ~~`gpu`~~                                     | ~~number\|null~~   | ~~单独的 GPU 占用率字段。~~ **2026-07-26 修订**：当前上报与历史查询均忽略该字段 |
-| `gpu_info`                                    | string             | 通常是序列化后的 JSON 数组字符串：`[{"id":"0","name":"GPU","info":12.5}]`，其中 `info` 为占用率 |
+| `gpu_info`                                    | array\|string\|null | GPU 列表。实时上报 / WebSocket 可能是 `[{id,name,info}]` 数组；REST 详情和历史接口通常是同结构的 JSON 字符串，其中 `info` 为占用率 |
 | `arch`                                        | string             | 架构                        |
 | `os`                                          | string             | OS 名称                     |
+| `kernel_version`                              | string             | 内核版本                    |
 | `agent_version`                               | string             | 最新一次上报的探针版本号              |
 | `region`                                      | string             | `request.cf.country` 或 `cf-ipcountry` 的原始值；通常为大写两字母国家/地区代码 |
 | `ip_v4`                                       | string `"0"`/`"1"` | IPv4 可达性                  |
@@ -1501,16 +1504,16 @@ UUID 缺失或格式非法时返回 `400 { "error": "invalidServerId", "code": 4
 
 ### 5.2 Metrics 对象（探针上报 payload）
 
-> 见 [§1.1 metrics 字段表](#11-post-update---指标上报agent-入口)。~~所有数值字段都是字符串，只有 `gpu` 例外。~~ **2026-07-26 修订**：后端接受字符串或数值，官方 Bash / PowerShell 探针的具体类型并不完全一致；当前 GPU 数据统一使用 `gpu_info`。
+> 见 [§1.1 metrics 字段表](#11-post-update---指标上报agent-入口)。后端接受字符串或数值，官方 Bash / PowerShell 探针的具体类型并不完全一致；当前 GPU 数据统一使用 `gpu_info`，不返回独立 `gpu` 字段。
 
 ### 5.3 History Row 对象
 
 | 字段          | 类型             | 说明 |
 | ----------- | -------------- | ---- |
 | `timestamp` | number (ms)    | 采样时间 |
-| 其余字段        | number\|string\|null | 当前 `/api/history/all` 固定返回：`cpu, gpu_info, ram_total, ram_used, disk_total, disk_used, processes, net_in_speed, net_out_speed, tcp_conn, udp_conn, ping_ct, ping_cu, ping_cm, ping_bd, loss_ct, loss_cu, loss_cm, loss_bd, swap_total, swap_used, load_avg, region` |
+| 其余字段        | number\|string\|null | 当前 `/api/history/all` 固定返回：`cpu, gpu_info, ram_total, ram_used, disk_total, disk_used, processes, net_in_speed, net_out_speed, tcp_conn, udp_conn, ping_ct, ping_cu, ping_cm, ping_bd, loss_ct, loss_cu, loss_cm, loss_bd, swap_total, swap_used, load_avg, region, kernel_version`；其中 `gpu_info` 通常是 JSON 数组字符串 |
 
-~~历史行包含单独的 `gpu` 字段。~~ **2026-07-26 修订**：当前固定查询不包含 `gpu`，只包含 `gpu_info`。
+历史行不包含单独的 `gpu` 字段，只包含 `gpu_info`。
 
 ### 5.4 Settings 对象
 
@@ -1625,7 +1628,8 @@ curl -X POST https://status.example.com/update \
       "net_rx":"12345678","net_tx":"87654321",
       "net_rx_monthly":"1073741824","net_tx_monthly":"536870912",
       "net_in_speed":"1024","net_out_speed":"512",
-      "os":"Ubuntu 22.04","arch":"x86_64","cpu_info":"Intel Xeon","cpu_cores":"4",
+      "os":"Ubuntu 22.04","arch":"x86_64","kernel_version":"6.8.0-36-generic","cpu_info":"Intel Xeon","cpu_cores":"4",
+      "gpu_info":[{"id":"0","name":"NVIDIA GPU","info":12.5}],
       "processes":"256","tcp_conn":"32","udp_conn":"4",
       "ip_v4":"1","ip_v6":"1",
       "ping_ct":"23","ping_cu":"25","ping_cm":"30","ping_bd":"40"

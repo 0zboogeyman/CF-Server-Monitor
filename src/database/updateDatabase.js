@@ -203,9 +203,6 @@ async function cleanupServerExtraColumns(db) {
 
 export async function addHistoryColumns(db) {
   try {
-    const { results: historyColumns } = await db.prepare(`PRAGMA table_info(metrics_history)`).all();
-    const existingHistoryCols = historyColumns.map(c => c.name);
-    
     const newHistoryCols = {
       cpu_cores: "INTEGER DEFAULT 0",
       cpu_info: "TEXT DEFAULT ''",
@@ -213,6 +210,7 @@ export async function addHistoryColumns(db) {
       gpu_info: "TEXT DEFAULT ''",
       arch: "TEXT DEFAULT ''",
       os: "TEXT DEFAULT ''",
+      kernel_version: "TEXT DEFAULT ''",
       region: "TEXT DEFAULT ''",
       ip_v4: "TEXT DEFAULT '0'",
       ip_v6: "TEXT DEFAULT '0'",
@@ -224,18 +222,29 @@ export async function addHistoryColumns(db) {
       loss_cm: "INTEGER DEFAULT NULL",
       loss_bd: "INTEGER DEFAULT NULL"
     };
-    
+
+    const tables = ['metrics_history'];
+    const oldTable = await db.prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='metrics_history_old'`
+    ).first();
+    if (oldTable) tables.push('metrics_history_old');
+
     let added = 0;
-    for (const [colName, colDef] of Object.entries(newHistoryCols)) {
-      if (!existingHistoryCols.includes(colName)) {
-        await db.prepare(`ALTER TABLE metrics_history ADD COLUMN ${colName} ${colDef}`).run();
-        added++;
+    for (const tableName of tables) {
+      const { results: historyColumns } = await db.prepare(`PRAGMA table_info(${tableName})`).all();
+      const existingHistoryCols = historyColumns.map(c => c.name);
+
+      for (const [colName, colDef] of Object.entries(newHistoryCols)) {
+        if (!existingHistoryCols.includes(colName)) {
+          await db.prepare(`ALTER TABLE ${tableName} ADD COLUMN ${colName} ${colDef}`).run();
+          added++;
+        }
       }
     }
-    
+
     return { success: true, added };
   } catch (e) {
-    debug('添加 metrics_history 表列失败:', e);
+    debug('Failed to add metrics_history columns:', e);
     return { success: false, error: e.message };
   }
 }
