@@ -31,6 +31,7 @@
             <th class="table-center-cell col-width-35">↕️</th>
             <th class="col-width-30"><input type="checkbox" id="select-all" @change="$emit('select-all', $event)" class="checkbox-accent-green"></th>
             <th>{{ trans.hostname.toUpperCase() }}</th>
+            <th>IP</th>
             <th>{{ trans.group.toUpperCase() }}</th>
             <th>{{ trans.tags.toUpperCase() }}</th>
             <th>{{ trans.note.toUpperCase() }}</th>
@@ -47,7 +48,7 @@
         </thead>
         <tbody>
           <tr v-if="servers.length === 0">
-            <td colspan="15" class="empty-state"><span class="empty-icon">📦</span> {{ trans.noServers }}</td>
+            <td colspan="16" class="empty-state"><span class="empty-icon">📦</span> {{ trans.noServers }}</td>
           </tr>
           <tr
             v-for="server in servers"
@@ -79,6 +80,7 @@
                 >{{ server.name }}</router-link>
               </div>
             </td>
+            <td><span class="spec-text">{{ server.ip || '-' }}</span></td>
             <td><span class="group-tag">{{ server.server_group || trans.default }}</span></td>
             <td>
               <div v-if="splitTags(server.tags).length" class="tag-list admin-tag-list">
