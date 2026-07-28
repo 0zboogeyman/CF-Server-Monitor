@@ -6,6 +6,8 @@ import { addHistoryColumns, ensureHistoryIndex, isHistoryOptimized } from './upd
 
 let dbInitialized = false;
 
+const LOSS_AGG_COLUMNS = new Set(['loss_ct', 'loss_cu', 'loss_cm', 'loss_bd']);
+
 export async function initDatabase(db) {
   if (dbInitialized) return;
 
@@ -253,10 +255,20 @@ export async function getMetricsHistory(db, serverId, hours, columns, server = n
     idRange = getHistoryIdRange(historyInfo.partitionId, queryStart);
   }
 
-  const sourceQueries = [];
-  const bindValues = [intervalMs];
+  const columnList = columns.split(',').map(c => c.trim()).filter(c => c && c !== 'timestamp');
+  const sourceColumns = columnList.join(', ');
+  const lossColumns = columnList.filter(col => LOSS_AGG_COLUMNS.has(col));
+  const lossWindowExpressions = lossColumns.map(col =>
+    `MAX(${col}) OVER (PARTITION BY bucket) AS ${col}_bucket_max`
+  );
+  const selectColumns = columnList.map(col =>
+    LOSS_AGG_COLUMNS.has(col) ? `${col}_bucket_max AS ${col}` : col
+  );
 
-  sourceQueries.push(buildHistorySourceQuery('metrics_history', currentUsesIdRange, columns));
+  const sourceQueries = [];
+  const bindValues = [];
+
+  sourceQueries.push(buildHistorySourceQuery('metrics_history', currentUsesIdRange, sourceColumns));
   if (currentUsesIdRange) {
     bindValues.push(idRange.startId, idRange.endId);
   } else {
@@ -265,7 +277,7 @@ export async function getMetricsHistory(db, serverId, hours, columns, server = n
 
   if (oldTableExists) {
     debug('[History] 跨周查询，合并 metrics_history 和 metrics_history_old');
-    sourceQueries.push(buildHistorySourceQuery('metrics_history_old', oldUsesIdRange, columns));
+    sourceQueries.push(buildHistorySourceQuery('metrics_history_old', oldUsesIdRange, sourceColumns));
     if (oldUsesIdRange) {
       bindValues.push(idRange.startId, idRange.endId);
     } else {
@@ -273,20 +285,31 @@ export async function getMetricsHistory(db, serverId, hours, columns, server = n
     }
   }
 
+  bindValues.push(intervalMs);
+
   const rawResult = await db.prepare(`
-    WITH sampled AS (
+    WITH history_rows AS (
+      ${sourceQueries.join('\n        UNION ALL\n')}
+    ),
+    bucketed AS (
       SELECT
         timestamp,
-        ${columns},
+        ${sourceColumns},
+        CAST(timestamp / ? AS INTEGER) AS bucket
+      FROM history_rows
+    ),
+    sampled AS (
+      SELECT
+        timestamp,
+        ${sourceColumns},
         ROW_NUMBER() OVER (
-          PARTITION BY CAST(timestamp / ? AS INTEGER)
+          PARTITION BY bucket
           ORDER BY timestamp
         ) AS rn
-      FROM (
-        ${sourceQueries.join('\n        UNION ALL\n')}
-      )
+        ${lossWindowExpressions.length ? `,\n        ${lossWindowExpressions.join(',\n        ')}` : ''}
+      FROM bucketed
     )
-    SELECT timestamp, ${columns}
+    SELECT timestamp, ${selectColumns.join(', ')}
     FROM sampled
     WHERE rn = 1
   `).bind(...bindValues).all();

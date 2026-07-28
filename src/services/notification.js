@@ -125,8 +125,10 @@ export async function sendNotification(settings, msg) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          msgtype: "markdown",
-          markdown: { content: msg }
+          msgtype: "text",
+          text: {
+            content: msg.replace(/\*/g, '')
+          }
         })
       });
     } catch (e) {
