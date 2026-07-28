@@ -80,7 +80,13 @@
                 >{{ server.name }}</router-link>
               </div>
             </td>
-            <td><span class="spec-text">{{ server.ip || '-' }}</span></td>
+            <td>
+              <span
+                class="spec-text"
+                :class="{ 'spec-copied': isSpecCopied(server, 'ip') }"
+                @dblclick.stop="emitCopySpec(server, 'ip', server.ip)"
+              >{{ server.ip || '-' }}</span>
+            </td>
             <td><span class="group-tag">{{ server.server_group || trans.default }}</span></td>
             <td>
               <div v-if="splitTags(server.tags).length" class="tag-list admin-tag-list">
@@ -96,15 +102,40 @@
               >{{ server.note || '-' }}</span>
             </td>
             <td><span class="price-tag">{{ formatServerPrice(server) }}</span></td>
-            <td><span class="spec-text">{{ formatServerCurrency(server) }}</span></td>
-            <td><span class="spec-text">{{ formatServerBillingCycle(server) }}</span></td>
-            <td><span class="date-text">{{ server.expire_date || '-' }}</span></td>
-            <td><span class="spec-text">{{ isServerAutoRenewal(server) ? trans.enabled : trans.disabled }}</span></td>
-            <td><span class="spec-text">{{ server.traffic_limit ? formatBytes(server.traffic_limit * 1024 * 1024 * 1024) : '-' }}</span></td>
             <td>
               <span
                 class="spec-text"
-                :class="getAgentVersionClass(server.agent_version)"
+                :class="{ 'spec-copied': isSpecCopied(server, 'currency') }"
+                @dblclick.stop="emitCopySpec(server, 'currency', formatServerCurrency(server))"
+              >{{ formatServerCurrency(server) }}</span>
+            </td>
+            <td>
+              <span
+                class="spec-text"
+                :class="{ 'spec-copied': isSpecCopied(server, 'billing_cycle') }"
+                @dblclick.stop="emitCopySpec(server, 'billing_cycle', formatServerBillingCycle(server))"
+              >{{ formatServerBillingCycle(server) }}</span>
+            </td>
+            <td><span class="date-text">{{ server.expire_date || '-' }}</span></td>
+            <td>
+              <span
+                class="spec-text"
+                :class="{ 'spec-copied': isSpecCopied(server, 'auto_renewal') }"
+                @dblclick.stop="emitCopySpec(server, 'auto_renewal', isServerAutoRenewal(server) ? trans.enabled : trans.disabled)"
+              >{{ isServerAutoRenewal(server) ? trans.enabled : trans.disabled }}</span>
+            </td>
+            <td>
+              <span
+                class="spec-text"
+                :class="{ 'spec-copied': isSpecCopied(server, 'traffic_limit') }"
+                @dblclick.stop="emitCopySpec(server, 'traffic_limit', server.traffic_limit ? formatBytes(server.traffic_limit * 1024 * 1024 * 1024) : '')"
+              >{{ server.traffic_limit ? formatBytes(server.traffic_limit * 1024 * 1024 * 1024) : '-' }}</span>
+            </td>
+            <td>
+              <span
+                class="spec-text"
+                :class="[getAgentVersionClass(server.agent_version), { 'spec-copied': isSpecCopied(server, 'agent_version') }]"
+                @dblclick.stop="emitCopySpec(server, 'agent_version', server.agent_version)"
               >{{ server.agent_version || '●' }}</span>
             </td>
             <td>
@@ -143,17 +174,29 @@ const props = defineProps({
   themeUrl: { type: String, default: '' },
   latestAgentVersion: { type: String, default: '' },
   copiedServerId: { type: [String, Number], default: null },
-  copiedNoteServerId: { type: [String, Number], default: null }
+  copiedNoteServerId: { type: [String, Number], default: null },
+  copiedSpecKey: { type: String, default: null }
 })
 
 const newServerName = defineModel('newServerName', { type: String, default: '' })
 const newServerGroup = defineModel('newServerGroup', { type: String, default: '' })
 
-defineEmits([
+const emit = defineEmits([
   'add-server', 'batch-delete', 'toggle-select-all', 'select-all',
   'drag-start', 'drop', 'toggle-server', 'copy-note',
-  'copy-cmd', 'edit', 'delete'
+  'copy-spec', 'copy-cmd', 'edit', 'delete'
 ])
+
+const getSpecCopyKey = (server, field) => `${server.id}:${field}`
+const isSpecCopied = (server, field) => props.copiedSpecKey === getSpecCopyKey(server, field)
+const emitCopySpec = (server, field, value) => {
+  const text = String(value || '').trim()
+  if (!text || text === '-') return
+  emit('copy-spec', {
+    key: getSpecCopyKey(server, field),
+    text
+  })
+}
 
 const splitTags = (value) => String(value || '')
   .split(',')

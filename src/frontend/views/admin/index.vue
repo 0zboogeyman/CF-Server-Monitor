@@ -112,6 +112,7 @@
           :latest-agent-version="latestAgentVersion"
           :copied-server-id="copiedServerId"
           :copied-note-server-id="copiedNoteServerId"
+          :copied-spec-key="copiedSpecKey"
           @add-server="addServer"
           @batch-delete="batchDelete"
           @toggle-select-all="toggleSelectAll"
@@ -120,6 +121,7 @@
           @drop="handleDrop"
           @toggle-server="toggleServer"
           @copy-note="copyServerNote"
+          @copy-spec="copyServerSpec"
           @copy-cmd="copyCmd"
           @edit="openEditModal"
           @delete="openDeleteModal"
@@ -673,6 +675,7 @@ const deleteServerId = ref('')
 
 const copiedServerId = ref(null)
 const copiedNoteServerId = ref(null)
+const copiedSpecKey = ref(null)
 const deleteTargetOs = ref('linux')
 const uninstallCopied = ref(false)
 const saving = ref(false)
@@ -767,6 +770,23 @@ const copyServerNote = async (server) => {
     }, 1500)
   } catch (e) {
     console.error('[ERROR] Copy note failed:', e)
+  }
+}
+
+const copyServerSpec = async ({ key, text } = {}) => {
+  const value = String(text || '').trim()
+  if (!key || !value || value === '-') return
+
+  try {
+    await copyTextToClipboard(value)
+    copiedSpecKey.value = key
+    setTimeout(() => {
+      if (copiedSpecKey.value === key) {
+        copiedSpecKey.value = null
+      }
+    }, 1500)
+  } catch (e) {
+    console.error('[ERROR] Copy spec failed:', e)
   }
 }
 
