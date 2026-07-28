@@ -48,6 +48,22 @@ function isValidName(name) {
   return name && typeof name === 'string' && name.trim().length > 0 && name.length <= 100;
 }
 
+function isMissingColumnError(error) {
+  const message = error?.message || String(error);
+  return /no such column|has no column/i.test(message);
+}
+
+async function handleServerMutationError(db, error, fallbackMessage) {
+  if (isMissingColumnError(error)) {
+    console.warn('检测到数据库字段缺失，尝试添加缺失字段...');
+    await addServerColumns(db);
+    return createBadRequestResponse('dbColumnsAdded');
+  }
+
+  const errMsg = error?.message || String(error);
+  return createBadRequestResponse(errMsg || fallbackMessage);
+}
+
 function sanitizeCspDomains(input) {
   if (!input || typeof input !== 'string') return '';
   return input
@@ -609,16 +625,20 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
       const group = data.server_group || 'Default';
       const region = normalizeServerRegion(data.region);
 
-      const { max_order } = await env.DB.prepare('SELECT COALESCE(MAX(sort_order), -1) as max_order FROM servers').first();
-      const sortOrder = (max_order || 0) + 1;
+      try {
+        const { max_order } = await env.DB.prepare('SELECT COALESCE(MAX(sort_order), -1) as max_order FROM servers').first();
+        const sortOrder = (max_order || 0) + 1;
 
-      const historyPartitionId = await getNextServerHistoryPartitionId(env.DB);
+        const historyPartitionId = await getNextServerHistoryPartitionId(env.DB);
 
-      await env.DB.prepare(`
-        INSERT INTO servers
-        (id, name, server_group, region, sort_order, history_partition_id, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).bind(id, name, group, region, sortOrder, historyPartitionId, Date.now()).run();
+        await env.DB.prepare(`
+          INSERT INTO servers
+          (id, name, server_group, region, sort_order, history_partition_id, timestamp)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).bind(id, name, group, region, sortOrder, historyPartitionId, Date.now()).run();
+      } catch (e) {
+        return handleServerMutationError(env.DB, e, 'serverAddFailed');
+      }
       
       clearServersListCache();
       
@@ -741,14 +761,7 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
           id
         ).run();
       } catch (e) {
-        if (e.message && /no such column/i.test(e.message)) {
-          console.warn('检测到数据库字段缺失，尝试添加缺失字段...');
-          await addServerColumns(env.DB);
-          return createBadRequestResponse('dbColumnsAdded');
-        }else{
-          const errMsg = e?.message || String(e);
-          return createBadRequestResponse(errMsg || 'serverUpdateFailed');
-        }
+        return handleServerMutationError(env.DB, e, 'serverUpdateFailed');
       }
       
       clearServersListCache();
