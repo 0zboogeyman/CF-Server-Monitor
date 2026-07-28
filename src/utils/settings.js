@@ -7,8 +7,6 @@ export const SITE_FIELDS = ['is_public', 'show_price', 'show_expire', 'show_tf',
 
 const SITE_SETTINGS_TTL = 120 * 1000;
 const JWT_SECRET_MIN_LENGTH = 32;
-const LEGACY_CUSTOM_BD = 'lf3-ips.zstaticcdn.com';
-const CURRENT_CUSTOM_BD = 'ip.zstaticcdn.com';
 export const TG_NOTIFY_MINUTES_MIN = 2;
 export const TG_NOTIFY_MINUTES_MAX = 30;
 export const TG_NOTIFY_LEGACY_TRUE_MINUTES = 5;
@@ -47,7 +45,7 @@ const defaults = {
   custom_ct: 'gd-ct-dualstack.ip.zstaticcdn.com',
   custom_cu: 'gd-cu-dualstack.ip.zstaticcdn.com',
   custom_cm: 'gd-cm-dualstack.ip.zstaticcdn.com',
-  custom_bd: 'ip.zstaticcdn.com',
+  custom_bd: '',
   expire_reminder: '0',
   theme_url: '',
   history_id_optimized: 'false',
@@ -135,10 +133,6 @@ function copyFields(target, source, fields) {
       target[field] = source[field];
     }
   }
-}
-
-function normalizeCustomBd(value) {
-  return value === LEGACY_CUSTOM_BD ? CURRENT_CUSTOM_BD : value;
 }
 
 export function normalizeDisplayMode(value, fallback = 'bar') {
@@ -236,13 +230,6 @@ export async function loadSiteSettings(db) {
     }
     result.tg_notify = normalizeTgNotify(result.tg_notify);
     result.expire_reminder = normalizeExpireReminder(result.expire_reminder);
-    const normalizedCustomBd = normalizeCustomBd(result.custom_bd);
-    if (normalizedCustomBd !== result.custom_bd) {
-      result.custom_bd = normalizedCustomBd;
-      await saveSiteOptions(db, { custom_bd: normalizedCustomBd });
-    } else {
-      result.custom_bd = normalizedCustomBd;
-    }
   } catch (e) {
     console.error('加载站点设置失败:', e);
   }
@@ -323,7 +310,6 @@ export async function saveSiteOptions(db, updates) {
   const siteOptions = { ...legacySiteOptions, ...existingSiteOptions, ...updates };
   siteOptions.tg_notify = normalizeTgNotify(siteOptions.tg_notify);
   siteOptions.expire_reminder = normalizeExpireReminder(siteOptions.expire_reminder);
-  siteOptions.custom_bd = normalizeCustomBd(siteOptions.custom_bd);
   
   await db.prepare(
     'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
