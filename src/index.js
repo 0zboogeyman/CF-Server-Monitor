@@ -1,5 +1,5 @@
 import { initDatabase, weeklyCleanup, getMetricsHistory, clearHistory } from './database/schema.js';
-import { checkOfflineNodes, checkExpiringServers } from './services/notification.js';
+import { checkOfflineNodes, checkExpiringServers, checkResourceAlerts } from './services/notification.js';
 import { updateDatabase } from './database/updateDatabase.js';
 import { handleAdminAPI } from './handlers/admin.js';
 import { serveFrontend } from './handlers/frontend.js';
@@ -430,6 +430,9 @@ export default {
         debug('[Cron] 开始执行离线节点检测');
         await checkOfflineNodes(env.DB);
         debug('[Cron] 离线节点检测完成');
+        debug('[Cron] 开始执行资源负载告警检测');
+        await checkResourceAlerts(env);
+        debug('[Cron] 资源负载告警检测完成');
       }
     } else if (cron === '0 * * * *') {
       if (day === 0 && hour === 0) {

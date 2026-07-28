@@ -3,7 +3,7 @@ export const AGENT_VERSION = '1.3.4';
 export const DEFAULT_SITE_TITLE = 'Cloudflare Server Monitor';
 export const APPEARANCE_FIELDS = ['site_title', 'custom_bg', 'favicon', 'custom_head', 'custom_script', 'csp_static', 'csp_api', 'display_mode', 'theme_options'];
 
-export const SITE_FIELDS = ['is_public', 'show_price', 'show_expire', 'show_tf', 'show_time', 'show_long_history', 'tg_notify', 'tg_bot_token', 'tg_chat_id', 'turnstile_enabled', 'turnstile_login_enabled', 'turnstile_site_key', 'turnstile_secret_key', 'jwt_secret', 'username', 'password', 'cloudflare_account_id', 'cloudflare_token', 'custom_ct', 'custom_cu', 'custom_cm', 'custom_bd', 'expire_reminder', 'theme_url', 'history_id_optimized','servers_optimized'];
+export const SITE_FIELDS = ['is_public', 'show_price', 'show_expire', 'show_tf', 'show_time', 'show_long_history', 'tg_notify', 'tg_bot_token', 'tg_chat_id', 'turnstile_enabled', 'turnstile_login_enabled', 'turnstile_site_key', 'turnstile_secret_key', 'jwt_secret', 'username', 'password', 'cloudflare_account_id', 'cloudflare_token', 'custom_ct', 'custom_cu', 'custom_cm', 'custom_bd', 'expire_reminder', 'resource_alert_mode', 'resource_alert_window_minutes', 'resource_alert_cpu_percent', 'resource_alert_ram_percent', 'resource_alert_net_in_mbps', 'resource_alert_net_out_mbps', 'resource_alert_net_total_mbps', 'theme_url', 'history_id_optimized','servers_optimized'];
 
 const SITE_SETTINGS_TTL = 120 * 1000;
 const JWT_SECRET_MIN_LENGTH = 32;
@@ -11,6 +11,11 @@ export const TG_NOTIFY_MINUTES_MIN = 2;
 export const TG_NOTIFY_MINUTES_MAX = 30;
 export const TG_NOTIFY_LEGACY_TRUE_MINUTES = 5;
 export const EXPIRE_REMINDER_DAYS_MAX = 7;
+export const RESOURCE_ALERT_WINDOW_MIN = 5;
+export const RESOURCE_ALERT_WINDOW_MAX = 10;
+export const RESOURCE_ALERT_COOLDOWN_MINUTES = 60;
+export const RESOURCE_ALERT_MODE_CONTINUOUS = 'continuous';
+export const RESOURCE_ALERT_MODE_AVERAGE = 'average';
 let cachedSiteSettings = null;
 let siteSettingsCacheExpiry = 0;
 let cachedAppearanceOptions = null;
@@ -47,6 +52,13 @@ const defaults = {
   custom_cm: 'gd-cm-dualstack.ip.zstaticcdn.com',
   custom_bd: '',
   expire_reminder: '0',
+  resource_alert_mode: RESOURCE_ALERT_MODE_CONTINUOUS,
+  resource_alert_window_minutes: '0',
+  resource_alert_cpu_percent: '80',
+  resource_alert_ram_percent: '80',
+  resource_alert_net_in_mbps: '0',
+  resource_alert_net_out_mbps: '0',
+  resource_alert_net_total_mbps: '0',
   theme_url: '',
   history_id_optimized: 'false',
   servers_optimized: 'false'
@@ -101,6 +113,66 @@ export function normalizeExpireReminder(value) {
 
 export function getExpireReminderDays(value) {
   return Number(normalizeExpireReminder(value));
+}
+
+export function normalizeResourceAlertWindowMinutes(value) {
+  const minutes = Number(value);
+  if (
+    Number.isInteger(minutes) &&
+    (minutes === 0 || (minutes >= RESOURCE_ALERT_WINDOW_MIN && minutes <= RESOURCE_ALERT_WINDOW_MAX))
+  ) {
+    return String(minutes);
+  }
+  return '0';
+}
+
+export function normalizeResourceAlertPercent(value) {
+  if (value === undefined || value === null || value === '') return '0';
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0 || number > 100) return '0';
+  return String(Math.round(number * 100) / 100);
+}
+
+export function normalizeResourceAlertMbps(value) {
+  if (value === undefined || value === null || value === '') return '0';
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0 || number > 100000) return '0';
+  return String(Math.round(number * 100) / 100);
+}
+
+export function normalizeResourceAlertMode(value) {
+  const mode = String(value || '').trim().toLowerCase();
+  return mode === RESOURCE_ALERT_MODE_AVERAGE
+    ? RESOURCE_ALERT_MODE_AVERAGE
+    : RESOURCE_ALERT_MODE_CONTINUOUS;
+}
+
+export function getResourceAlertConfig(settings = {}) {
+  const mode = normalizeResourceAlertMode(settings.resource_alert_mode);
+  const windowMinutes = Number(normalizeResourceAlertWindowMinutes(settings.resource_alert_window_minutes));
+  const cpuPercent = Number(normalizeResourceAlertPercent(settings.resource_alert_cpu_percent));
+  const ramPercent = Number(normalizeResourceAlertPercent(settings.resource_alert_ram_percent));
+  const netInMbps = Number(normalizeResourceAlertMbps(settings.resource_alert_net_in_mbps));
+  const netOutMbps = Number(normalizeResourceAlertMbps(settings.resource_alert_net_out_mbps));
+  const netTotalMbps = Number(normalizeResourceAlertMbps(settings.resource_alert_net_total_mbps));
+
+  const thresholds = {
+    cpuPercent,
+    ramPercent,
+    netInBps: netInMbps * 1024 * 1024,
+    netOutBps: netOutMbps * 1024 * 1024,
+    netTotalBps: netTotalMbps * 1024 * 1024
+  };
+
+  return {
+    enabled: windowMinutes > 0,
+    mode,
+    windowMinutes,
+    cooldownMinutes: RESOURCE_ALERT_COOLDOWN_MINUTES,
+    recoveryCooldownMinutes: windowMinutes > 0 ? windowMinutes : RESOURCE_ALERT_WINDOW_MIN,
+    thresholds,
+    hasThresholds: Object.values(thresholds).some(value => Number(value) > 0)
+  };
 }
 
 export function generateRandomSecret(byteLength = 32) {
@@ -230,6 +302,13 @@ export async function loadSiteSettings(db) {
     }
     result.tg_notify = normalizeTgNotify(result.tg_notify);
     result.expire_reminder = normalizeExpireReminder(result.expire_reminder);
+    result.resource_alert_mode = normalizeResourceAlertMode(result.resource_alert_mode);
+    result.resource_alert_window_minutes = normalizeResourceAlertWindowMinutes(result.resource_alert_window_minutes);
+    result.resource_alert_cpu_percent = normalizeResourceAlertPercent(result.resource_alert_cpu_percent);
+    result.resource_alert_ram_percent = normalizeResourceAlertPercent(result.resource_alert_ram_percent);
+    result.resource_alert_net_in_mbps = normalizeResourceAlertMbps(result.resource_alert_net_in_mbps);
+    result.resource_alert_net_out_mbps = normalizeResourceAlertMbps(result.resource_alert_net_out_mbps);
+    result.resource_alert_net_total_mbps = normalizeResourceAlertMbps(result.resource_alert_net_total_mbps);
   } catch (e) {
     console.error('加载站点设置失败:', e);
   }

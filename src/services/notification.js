@@ -1,10 +1,12 @@
 import { getLatestMetricsForAllServers } from '../database/schema.js';
 import { clearServersListCache, getAllServers } from '../utils/cache.js';
-import { getExpireReminderDays, getTgNotifyMinutes, loadSiteSettings, debug } from '../utils/settings.js';
+import { getExpireReminderDays, getResourceAlertConfig, getTgNotifyMinutes, loadSiteSettings, debug } from '../utils/settings.js';
 import { detectBillingCycle, normalizeBillingCycle, renewExpireDateIfNeeded } from '../utils/serverBilling.js';
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
+const RESOURCE_ALERT_STATE_ACTIVE = 'active';
+const RESOURCE_ALERT_STATE_RECOVERED = 'recovered';
 
 function formatLastReportTime(timestamp) {
   if (!timestamp) return '无上报记录';
@@ -13,6 +15,74 @@ function formatLastReportTime(timestamp) {
   if (Number.isNaN(date.getTime())) return '无效时间';
 
   return date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+}
+
+function formatBytesPerSecond(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return '0 B/s';
+  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s'];
+  let size = number;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size >= 10 ? size.toFixed(1) : size.toFixed(2)} ${units[unitIndex]}`;
+}
+
+function formatPercent(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '0%';
+  return `${number.toFixed(number >= 10 ? 1 : 2)}%`;
+}
+
+function formatResourceMetric(metric) {
+  const metricLabels = {
+    cpu: 'CPU',
+    ram: 'RAM',
+    netIn: '下行网速',
+    netOut: '上行网速',
+    netTotal: '总网速'
+  };
+  const label = metricLabels[metric.metric] || metric.metric;
+  const valueLabel = metric.mode === 'average' ? '平均' : '当前';
+  const value = metric.triggerValue ?? metric.current;
+  if (metric.metric === 'cpu' || metric.metric === 'ram') {
+    return `${label} ${valueLabel} ${formatPercent(value)} > ${formatPercent(metric.threshold)}`;
+  }
+  return `${label} ${valueLabel} ${formatBytesPerSecond(value)} > ${formatBytesPerSecond(metric.threshold)}`;
+}
+
+function parseResourceAlertState(row) {
+  if (!row || !row.value) return { signature: '', servers: {} };
+  try {
+    const parsed = JSON.parse(row.value);
+    if (parsed && typeof parsed === 'object' && parsed.servers && typeof parsed.servers === 'object') {
+      return {
+        signature: String(parsed.signature || ''),
+        servers: parsed.servers
+      };
+    }
+  } catch (_) {}
+  return { signature: '', servers: {} };
+}
+
+function getResourceAlertStateStatus(state) {
+  if (!state || typeof state !== 'object') return RESOURCE_ALERT_STATE_ACTIVE;
+  return state.status === RESOURCE_ALERT_STATE_RECOVERED
+    ? RESOURCE_ALERT_STATE_RECOVERED
+    : RESOURCE_ALERT_STATE_ACTIVE;
+}
+
+function getResourceAlertStateTimestamp(state, key) {
+  if (!state || typeof state !== 'object') return 0;
+  const timestamp = Number(state[key] || 0);
+  return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : 0;
+}
+
+function isServerNotificationDisabled(server) {
+  const value = server?.offline_notify_disabled;
+  return value === true || value === 1 || value === '1' || value === 'true';
 }
 
 async function fetchWithRetry(url, options, retries = MAX_RETRIES) {
@@ -276,6 +346,152 @@ export async function checkOfflineNodes(db) {
     }
   } catch (e) {
     console.error('离线检测失败:', e);
+  }
+}
+
+export async function checkResourceAlerts(env) {
+  if (!env?.DB || !env?.METRICS_BROADCASTER) return;
+
+  const db = env.DB;
+  const siteSettings = await loadSiteSettings(db);
+  const resourceConfig = getResourceAlertConfig(siteSettings);
+
+  if (!resourceConfig.enabled || !resourceConfig.hasThresholds || !siteSettings.tg_bot_token) return;
+
+  try {
+    const allServers = await getAllServers(db);
+    const alertableServers = allServers.filter(server => !isServerNotificationDisabled(server));
+    const serverIds = alertableServers.map(server => server.id).filter(Boolean);
+    if (serverIds.length === 0) {
+      await db.prepare("DELETE FROM settings WHERE key = 'resource_alert_state'").run();
+      return;
+    }
+
+    const id = env.METRICS_BROADCASTER.idFromName('global');
+    const stub = env.METRICS_BROADCASTER.get(id);
+    const response = await stub.fetch('http://internal/evaluate-resource-alerts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        serverIds,
+        mode: resourceConfig.mode,
+        windowMinutes: resourceConfig.windowMinutes,
+        thresholds: resourceConfig.thresholds
+      })
+    });
+
+    if (!response.ok) {
+      console.warn('[ResourceAlert] DO evaluate failed:', response.status);
+      return;
+    }
+
+    const result = await response.json();
+    const activeAlerts = Array.isArray(result.alerts) ? result.alerts : [];
+    const activeMap = new Map(activeAlerts.map(alert => [alert.serverId, alert]));
+
+    const configSignature = JSON.stringify({
+      mode: resourceConfig.mode,
+      windowMinutes: resourceConfig.windowMinutes,
+      thresholds: resourceConfig.thresholds
+    });
+
+    const stateRow = await db.prepare(
+      "SELECT value FROM settings WHERE key = 'resource_alert_state'"
+    ).first();
+    const parsedState = parseResourceAlertState(stateRow);
+    let alertState = parsedState.signature === configSignature ? parsedState.servers : {};
+
+    const now = Date.now();
+    const cooldownMs = resourceConfig.cooldownMinutes * 60 * 1000;
+    const recoveryCooldownMs = resourceConfig.recoveryCooldownMinutes * 60 * 1000;
+    const alertNodes = [];
+    const recoveredNodes = [];
+    let stateChanged = parsedState.signature !== configSignature;
+
+    for (const server of allServers) {
+      if (isServerNotificationDisabled(server)) {
+        if (alertState[server.id]) {
+          delete alertState[server.id];
+          stateChanged = true;
+        }
+        continue;
+      }
+
+      const alert = activeMap.get(server.id);
+      const currentState = alertState[server.id];
+      const currentStatus = currentState
+        ? getResourceAlertStateStatus(currentState)
+        : '';
+
+      if (alert) {
+        const recoveredAt = currentStatus === RESOURCE_ALERT_STATE_RECOVERED
+          ? getResourceAlertStateTimestamp(currentState, 'recoveredAt')
+          : 0;
+        if (recoveredAt > 0 && now - recoveredAt < recoveryCooldownMs) {
+          continue;
+        }
+
+        const isActiveAlert = currentStatus === RESOURCE_ALERT_STATE_ACTIVE;
+        const lastNotifyAt = isActiveAlert
+          ? getResourceAlertStateTimestamp(currentState, 'lastNotifyAt')
+          : 0;
+        const shouldNotify = !currentState || !isActiveAlert || now - lastNotifyAt >= cooldownMs;
+        if (shouldNotify) {
+          alertNodes.push({ server, alert, repeated: isActiveAlert && !!currentState });
+          alertState[server.id] = {
+            status: RESOURCE_ALERT_STATE_ACTIVE,
+            alertAt: isActiveAlert ? (currentState?.alertAt || now) : now,
+            lastNotifyAt: now,
+            lastTriggeredAt: now,
+            metrics: alert.metrics.map(metric => metric.metric)
+          };
+          stateChanged = true;
+        }
+      } else if (currentState) {
+        if (currentStatus === RESOURCE_ALERT_STATE_ACTIVE) {
+          recoveredNodes.push(server);
+          alertState[server.id] = {
+            ...currentState,
+            status: RESOURCE_ALERT_STATE_RECOVERED,
+            recoveredAt: now,
+            lastRecoveryNotifyAt: now
+          };
+          stateChanged = true;
+        } else {
+          const recoveredAt = getResourceAlertStateTimestamp(currentState, 'recoveredAt');
+          if (recoveredAt === 0 || now - recoveredAt >= recoveryCooldownMs) {
+            delete alertState[server.id];
+            stateChanged = true;
+          }
+        }
+      }
+    }
+
+    if (alertNodes.length > 0) {
+      const nodeList = alertNodes.map(({ server, alert, repeated }) => {
+        const metrics = alert.metrics.map(formatResourceMetric).join('；');
+        const repeatText = repeated ? '（再次提醒）' : '';
+        const modeText = alert.mode === 'average' ? '平均' : '窗口样本连续';
+        const sampleText = Number(alert.sampleCount) > 0 ? `，样本 ${alert.sampleCount} 个` : '';
+        return `• ${server.name}${repeatText} - ${modeText} ${alert.windowMinutes} 分钟${sampleText}\n  ${metrics}`;
+      }).join('\n');
+      const msg = `⚠️ **资源负载告警** (${alertNodes.length}个)\n\n${nodeList}`;
+      await sendNotification(siteSettings, msg);
+    }
+
+    if (recoveredNodes.length > 0) {
+      const nodeList = recoveredNodes.map(server => `• ${server.name}`).join('\n');
+      const msg = `✅ **资源负载恢复** (${recoveredNodes.length}个)\n\n${nodeList}\n\n**时间:** ${new Date().toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}`;
+      await sendNotification(siteSettings, msg);
+    }
+
+    if (stateChanged) {
+      await db.prepare(
+        'INSERT INTO settings (key, value) VALUES ("resource_alert_state", ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+      ).bind(JSON.stringify({ signature: configSignature, servers: alertState })).run();
+    }
+  } catch (e) {
+    console.error('资源负载告警检测失败:', e);
   }
 }
 

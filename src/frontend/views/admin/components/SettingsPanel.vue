@@ -149,6 +149,54 @@
               <option v-for="option in expireReminderOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
             </select>
           </div>
+
+          <div class="form-group flex-1">
+            <label class="form-label">{{ trans.resourceAlertWindow }}</label>
+            <select v-model="settings.resource_alert_window_minutes" class="form-select">
+              <option v-for="option in resourceAlertWindowOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <p class="text-muted text-sm mt-1">{{ trans.resourceAlertTip }}</p>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">{{ trans.resourceAlertMode }}</label>
+            <select v-model="settings.resource_alert_mode" class="form-select" :disabled="!resourceAlertActive">
+              <option value="continuous">{{ trans.resourceAlertModeContinuous }}</option>
+              <option value="average">{{ trans.resourceAlertModeAverage }}</option>
+            </select>
+          </div>
+
+          <div class="form-group flex-1">
+            <label class="form-label">{{ trans.resourceAlertCpu }}</label>
+            <input type="number" min="0" max="100" step="1" v-model="settings.resource_alert_cpu_percent" class="form-input" :disabled="!resourceAlertActive" placeholder="80">
+          </div>
+
+          <div class="form-group flex-1">
+            <label class="form-label">{{ trans.resourceAlertRam }}</label>
+            <input type="number" min="0" max="100" step="1" v-model="settings.resource_alert_ram_percent" class="form-input" :disabled="!resourceAlertActive" placeholder="80">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">{{ trans.resourceAlertNetIn }}</label>
+            <input type="number" min="0" step="1" v-model="settings.resource_alert_net_in_mbps" class="form-input" :disabled="!resourceAlertActive" placeholder="100">
+          </div>
+
+          <div class="form-group flex-1">
+            <label class="form-label">{{ trans.resourceAlertNetOut }}</label>
+            <input type="number" min="0" step="1" v-model="settings.resource_alert_net_out_mbps" class="form-input" :disabled="!resourceAlertActive" placeholder="100">
+          </div>
+
+          <div class="form-group flex-1">
+            <label class="form-label">{{ trans.resourceAlertNetTotal }}</label>
+            <input type="number" min="0" step="1" v-model="settings.resource_alert_net_total_mbps" class="form-input" :disabled="!resourceAlertActive" placeholder="100">
+          </div>
         </div>
         <div class="form-row">
           <div class="form-group flex-1">
@@ -438,6 +486,23 @@ const expireReminderOptions = computed(() => [
       value: String(days),
       label: `${label}`
     }
+  })
+])
+
+const resourceAlertActive = computed(() => String(props.settings.resource_alert_window_minutes || '0') !== '0')
+
+const resourceAlertWindowOptions = computed(() => [
+  { value: '0', label: props.trans.disabled || 'Disabled' },
+  ...Array.from({ length: 6 }, (_, index) => {
+  const minutes = index + 5
+  const label = props.trans.resourceAlertWindowMinutes
+    ? props.trans.resourceAlertWindowMinutes.replace('{minutes}', minutes)
+    : `${minutes} min`
+
+  return {
+    value: String(minutes),
+    label
+  }
   })
 ])
 

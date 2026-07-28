@@ -17,6 +17,21 @@ const SERVER_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
 const WS_POLICY_VIOLATION = 1008;
 const LATEST_REPORT_TTL_MS = 5 * 60 * 1000;
 const MAX_LATEST_REPORT_SERVERS = 1000;
+const RESOURCE_ALERT_STORAGE_KEY = 'resource_alert_windows_v1';
+const RESOURCE_ALERT_BUCKET_MS = 60 * 1000;
+const RESOURCE_ALERT_MAX_BUCKETS = 10;
+const RESOURCE_ALERT_MAX_SERVERS = 1000;
+const RESOURCE_ALERT_SNAPSHOT_INTERVAL_MS = 60 * 1000;
+const RESOURCE_ALERT_LATEST_TOLERANCE_MS = 2 * 60 * 1000;
+const RESOURCE_ALERT_MIN_SAMPLE_RATIO = 0.8;
+const RESOURCE_ALERT_MIN_SAMPLE_COUNT = 3;
+const RESOURCE_ALERT_MODE_AVERAGE = 'average';
+const RESOURCE_ALERT_MODE_CONTINUOUS = 'continuous';
+
+function getAlertCutoffMinute(now, buckets) {
+  return Math.floor(now / RESOURCE_ALERT_BUCKET_MS) * RESOURCE_ALERT_BUCKET_MS -
+    Math.max(0, buckets - 1) * RESOURCE_ALERT_BUCKET_MS;
+}
 
 function parseAllowedOrigins(corsAllowedOrigins) {
   if (!corsAllowedOrigins || corsAllowedOrigins.trim() === '') {
@@ -28,12 +43,117 @@ function parseAllowedOrigins(corsAllowedOrigins) {
     .filter(o => o !== '');
 }
 
+function toFiniteNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function normalizeMetricTimestamp(value, fallback = Date.now()) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) return fallback;
+  return number < 10000000000 ? number * 1000 : number;
+}
+
+function normalizeResourceAlertSample(sample) {
+  if (!sample || typeof sample !== 'object' || !sample.data || typeof sample.data !== 'object') {
+    return null;
+  }
+
+  const metrics = sample.data.metrics || sample.data.payload || sample.data;
+  const ts = normalizeMetricTimestamp(sample.ts || sample.timestamp || metrics.sample_timestamp || metrics.last_updated || metrics.timestamp);
+  const cpu = toFiniteNumber(metrics.cpu);
+  const ramTotal = toFiniteNumber(metrics.ram_total);
+  const ramUsed = toFiniteNumber(metrics.ram_used);
+  const ram = ramTotal && ramTotal > 0 && ramUsed !== null
+    ? (ramUsed / ramTotal) * 100
+    : null;
+  const netIn = Math.max(0, toFiniteNumber(metrics.net_in_speed) ?? 0);
+  const netOut = Math.max(0, toFiniteNumber(metrics.net_out_speed) ?? 0);
+
+  return {
+    ts,
+    minuteTs: Math.floor(ts / RESOURCE_ALERT_BUCKET_MS) * RESOURCE_ALERT_BUCKET_MS,
+    cpu,
+    ram,
+    netIn,
+    netOut,
+    netTotal: netIn + netOut
+  };
+}
+
+function normalizeThresholds(thresholds = {}) {
+  const normalize = value => {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? number : 0;
+  };
+
+  return {
+    cpu: normalize(thresholds.cpuPercent),
+    ram: normalize(thresholds.ramPercent),
+    netIn: normalize(thresholds.netInBps),
+    netOut: normalize(thresholds.netOutBps),
+    netTotal: normalize(thresholds.netTotalBps)
+  };
+}
+
+function normalizeResourceAlertMode(value) {
+  return String(value || '').trim().toLowerCase() === RESOURCE_ALERT_MODE_AVERAGE
+    ? RESOURCE_ALERT_MODE_AVERAGE
+    : RESOURCE_ALERT_MODE_CONTINUOUS;
+}
+
+function getMetricValue(sample, metric) {
+  const value = sample?.[metric];
+  return Number.isFinite(value) ? value : null;
+}
+
+function summarizeMetric(samples, metric) {
+  const values = samples
+    .map(sample => getMetricValue(sample, metric))
+    .filter(value => value !== null);
+  if (values.length === 0) return null;
+  const sum = values.reduce((total, value) => total + value, 0);
+  return {
+    current: values[values.length - 1],
+    min: Math.min(...values),
+    max: Math.max(...values),
+    avg: sum / values.length
+  };
+}
+
+function getResourceAlertSampleSpan(samples) {
+  if (!Array.isArray(samples) || samples.length < 2) return 0;
+  return Math.max(0, samples[samples.length - 1].minuteTs - samples[0].minuteTs);
+}
+
+function getResourceAlertLatestTolerance(samples) {
+  if (!Array.isArray(samples) || samples.length < 2) return RESOURCE_ALERT_LATEST_TOLERANCE_MS;
+  const avgSpacing = getResourceAlertSampleSpan(samples) / (samples.length - 1);
+  return Math.max(RESOURCE_ALERT_LATEST_TOLERANCE_MS, avgSpacing * 1.5);
+}
+
+function hasSufficientResourceAlertSamples(samples, windowMinutes) {
+  if (!Array.isArray(samples) || samples.length < RESOURCE_ALERT_MIN_SAMPLE_COUNT) return false;
+
+  const requiredByCount = Math.ceil(windowMinutes * RESOURCE_ALERT_MIN_SAMPLE_RATIO);
+  if (samples.length >= requiredByCount) return true;
+
+  const targetSpan = Math.max(1, windowMinutes - 1) *
+    RESOURCE_ALERT_BUCKET_MS *
+    RESOURCE_ALERT_MIN_SAMPLE_RATIO;
+  return getResourceAlertSampleSpan(samples) >= targetSpan;
+}
+
 export class MetricsBroadcaster {
   constructor(state, env) {
     this.state = state;
     this.env = env;
     // 仅用于新页面快速接上最近一包数据；DO 重启或休眠回收后允许自然丢失。
     this.latestReportUpdates = new Map();
+    this.resourceAlertWindows = new Map();
+    this.resourceAlertSnapshotLoaded = false;
+    this.resourceAlertSnapshotDirty = false;
+    this.resourceAlertLastSnapshotSave = 0;
 
     // 自动响应 ping 心跳，DO 无需被唤醒
     // @ts-ignore - Cloudflare Workers 运行时提供 WebSocketRequestResponsePair
@@ -191,6 +311,12 @@ export class MetricsBroadcaster {
         });
       }
 
+      const reportTs = Date.now();
+      await this._ensureResourceAlertSnapshotLoaded();
+      await this._cacheResourceAlertSamples([{
+        serverId,
+        samples: [{ ts: reportTs, data: payload }]
+      }], reportTs);
       this._broadcast(serverId, payload);
       const count = this.state.getWebSockets().length;
       return new Response(JSON.stringify({ ok: true, subscribers: count }), {
@@ -228,6 +354,8 @@ export class MetricsBroadcaster {
       }
 
       const reportTs = Date.now();
+      await this._ensureResourceAlertSnapshotLoaded();
+      await this._cacheResourceAlertSamples(normalizedUpdates, reportTs);
       this._cacheLatestReportUpdates(normalizedUpdates, reportTs);
       this._broadcastBatch(normalizedUpdates, reportTs);
 
@@ -259,6 +387,39 @@ export class MetricsBroadcaster {
 
       const updates = this._getLatestReportUpdates(normalizedServerIds.ids);
       return new Response(JSON.stringify({ updates }), {
+        headers: {
+          'Cache-Control': 'no-store',
+          'Content-Type': 'application/json'
+        }
+      });
+    }
+
+    if (method === 'POST' && path === '/evaluate-resource-alerts') {
+      let body = null;
+      try {
+        body = await request.json();
+      } catch (_) {
+        return new Response(JSON.stringify({ error: 'invalid JSON' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      const normalizedServerIds = this._normalizeServerIds(body?.serverIds);
+      if (!normalizedServerIds.ok) {
+        return new Response(JSON.stringify({ error: 'invalid serverIds' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      await this._ensureResourceAlertSnapshotLoaded();
+      const result = await this._evaluateResourceAlerts({
+        ...body,
+        serverIds: normalizedServerIds.ids
+      });
+
+      return new Response(JSON.stringify(result), {
         headers: {
           'Cache-Control': 'no-store',
           'Content-Type': 'application/json'
@@ -332,6 +493,186 @@ export class MetricsBroadcaster {
       }
     }
     return updates;
+  }
+
+  async _ensureResourceAlertSnapshotLoaded() {
+    if (this.resourceAlertSnapshotLoaded) return;
+
+    this.resourceAlertSnapshotLoaded = true;
+    try {
+      const snapshot = await this.state.storage.get(RESOURCE_ALERT_STORAGE_KEY);
+      const windows = Array.isArray(snapshot?.windows) ? snapshot.windows : [];
+      const now = Date.now();
+      const cutoffMinute = getAlertCutoffMinute(now, RESOURCE_ALERT_MAX_BUCKETS);
+
+      for (const item of windows) {
+        if (!item || !item.serverId || !Array.isArray(item.samples)) continue;
+        const samples = item.samples
+          .filter(sample => sample && Number(sample.minuteTs) >= cutoffMinute)
+          .sort((a, b) => a.minuteTs - b.minuteTs)
+          .slice(-RESOURCE_ALERT_MAX_BUCKETS);
+        if (samples.length > 0) {
+          this.resourceAlertWindows.set(String(item.serverId), { samples });
+        }
+      }
+
+      this.resourceAlertLastSnapshotSave = Number(snapshot?.savedAt) || 0;
+    } catch (e) {
+      console.warn('[resource-alert] load snapshot failed:', e.message || e);
+    }
+  }
+
+  _pruneResourceAlertWindows(now = Date.now()) {
+    const cutoffMinute = getAlertCutoffMinute(now, RESOURCE_ALERT_MAX_BUCKETS);
+    for (const [serverId, window] of this.resourceAlertWindows) {
+      const samples = (window?.samples || [])
+        .filter(sample => sample && Number(sample.minuteTs) >= cutoffMinute)
+        .sort((a, b) => a.minuteTs - b.minuteTs)
+        .slice(-RESOURCE_ALERT_MAX_BUCKETS);
+
+      if (samples.length === 0) {
+        this.resourceAlertWindows.delete(serverId);
+      } else {
+        this.resourceAlertWindows.set(serverId, { samples });
+      }
+    }
+
+    while (this.resourceAlertWindows.size > RESOURCE_ALERT_MAX_SERVERS) {
+      const oldestServerId = this.resourceAlertWindows.keys().next().value;
+      if (oldestServerId === undefined) break;
+      this.resourceAlertWindows.delete(oldestServerId);
+    }
+  }
+
+  async _cacheResourceAlertSamples(updates, now = Date.now()) {
+    this._pruneResourceAlertWindows(now);
+
+    for (const update of updates) {
+      if (!update || !update.serverId || !Array.isArray(update.samples)) continue;
+      const serverId = String(update.serverId);
+      const minuteMap = new Map(
+        (this.resourceAlertWindows.get(serverId)?.samples || []).map(sample => [sample.minuteTs, sample])
+      );
+
+      for (const sample of update.samples) {
+        const normalized = normalizeResourceAlertSample(sample);
+        if (!normalized) continue;
+        minuteMap.set(normalized.minuteTs, normalized);
+      }
+
+      const samples = Array.from(minuteMap.values())
+        .filter(sample => sample && Number(sample.minuteTs) >= getAlertCutoffMinute(now, RESOURCE_ALERT_MAX_BUCKETS))
+        .sort((a, b) => a.minuteTs - b.minuteTs)
+        .slice(-RESOURCE_ALERT_MAX_BUCKETS);
+
+      if (samples.length > 0) {
+        this.resourceAlertWindows.delete(serverId);
+        this.resourceAlertWindows.set(serverId, { samples });
+        this.resourceAlertSnapshotDirty = true;
+      }
+    }
+
+    await this._persistResourceAlertSnapshotIfNeeded(now);
+  }
+
+  async _persistResourceAlertSnapshotIfNeeded(now = Date.now(), force = false) {
+    if (!this.resourceAlertSnapshotDirty && !force) return;
+    if (!force && now - this.resourceAlertLastSnapshotSave < RESOURCE_ALERT_SNAPSHOT_INTERVAL_MS) return;
+
+    this._pruneResourceAlertWindows(now);
+    const windows = [];
+    for (const [serverId, window] of this.resourceAlertWindows) {
+      if (!window || !Array.isArray(window.samples) || window.samples.length === 0) continue;
+      windows.push({
+        serverId,
+        samples: window.samples
+      });
+    }
+
+    try {
+      await this.state.storage.put(RESOURCE_ALERT_STORAGE_KEY, {
+        savedAt: now,
+        windows
+      });
+      this.resourceAlertSnapshotDirty = false;
+      this.resourceAlertLastSnapshotSave = now;
+    } catch (e) {
+      console.warn('[resource-alert] persist snapshot failed:', e.message || e);
+    }
+  }
+
+  async _evaluateResourceAlerts(body = {}) {
+    const now = Date.now();
+    this._pruneResourceAlertWindows(now);
+
+    const windowMinutesNumber = Number(body.windowMinutes);
+    const windowMinutes = Number.isInteger(windowMinutesNumber)
+      ? Math.max(5, Math.min(10, windowMinutesNumber))
+      : 5;
+    const cutoffMinute = getAlertCutoffMinute(now, windowMinutes);
+    const mode = normalizeResourceAlertMode(body.mode);
+    const thresholds = normalizeThresholds(body.thresholds);
+    const metricThresholds = [
+      ['cpu', thresholds.cpu],
+      ['ram', thresholds.ram],
+      ['netIn', thresholds.netIn],
+      ['netOut', thresholds.netOut],
+      ['netTotal', thresholds.netTotal]
+    ].filter(([, threshold]) => threshold > 0);
+
+    const alerts = [];
+    if (metricThresholds.length === 0) {
+      return { now, mode, windowMinutes, alerts };
+    }
+
+    for (const serverId of body.serverIds || []) {
+      const samples = (this.resourceAlertWindows.get(serverId)?.samples || [])
+        .filter(sample => sample && Number(sample.minuteTs) >= cutoffMinute)
+        .sort((a, b) => a.minuteTs - b.minuteTs);
+      if (!hasSufficientResourceAlertSamples(samples, windowMinutes)) continue;
+
+      const latestSample = samples[samples.length - 1];
+      if (!latestSample || now - latestSample.ts > getResourceAlertLatestTolerance(samples)) continue;
+
+      const metrics = [];
+      for (const [metric, threshold] of metricThresholds) {
+        const metricSamples = samples
+          .map(sample => ({ sample, value: getMetricValue(sample, metric) }))
+          .filter(item => item.value !== null);
+        if (!hasSufficientResourceAlertSamples(metricSamples.map(item => item.sample), windowMinutes)) continue;
+        const summary = summarizeMetric(metricSamples.map(item => item.sample), metric);
+        if (!summary) continue;
+
+        const triggerValue = mode === RESOURCE_ALERT_MODE_AVERAGE ? summary.avg : summary.current;
+        const isTriggered = mode === RESOURCE_ALERT_MODE_AVERAGE
+          ? triggerValue > threshold
+          : metricSamples.every(item => item.value > threshold);
+        if (!isTriggered) continue;
+
+        metrics.push({
+          metric,
+          mode,
+          threshold,
+          triggerValue,
+          ...summary
+        });
+      }
+
+      if (metrics.length > 0) {
+        alerts.push({
+          serverId,
+          mode,
+          windowMinutes,
+          sampleCount: samples.length,
+          minSampleRatio: RESOURCE_ALERT_MIN_SAMPLE_RATIO,
+          latestTs: latestSample.ts,
+          metrics
+        });
+      }
+    }
+
+    await this._persistResourceAlertSnapshotIfNeeded(now, true);
+    return { now, mode, windowMinutes, alerts };
   }
 
   // WebSocket 收到消息（ping 已被自动响应拦截，不会到达此处）

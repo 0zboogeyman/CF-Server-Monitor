@@ -512,6 +512,35 @@ const normalizeExpireReminderSetting = (value) => {
 
 const isExpireReminderEnabled = (value) => normalizeExpireReminderSetting(value) !== '0'
 
+const normalizeResourceAlertWindowSetting = (value) => {
+  const minutes = Number(value)
+  if (Number.isInteger(minutes) && (minutes === 0 || (minutes >= 5 && minutes <= 10))) {
+    return String(minutes)
+  }
+  return '0'
+}
+
+const normalizeResourceAlertModeSetting = (value) => {
+  const mode = String(value || '').trim().toLowerCase()
+  return mode === 'average' ? 'average' : 'continuous'
+}
+
+const normalizeResourceAlertPercentSetting = (value) => {
+  if (value === undefined || value === null || value === '') return '0'
+  const number = Number(value)
+  if (!Number.isFinite(number) || number < 0 || number > 100) return '0'
+  return String(Math.round(number * 100) / 100)
+}
+
+const normalizeResourceAlertMbpsSetting = (value) => {
+  if (value === undefined || value === null || value === '') return '0'
+  const number = Number(value)
+  if (!Number.isFinite(number) || number < 0 || number > 100000) return '0'
+  return String(Math.round(number * 100) / 100)
+}
+
+const isResourceAlertEnabled = (value) => normalizeResourceAlertWindowSetting(value) !== '0'
+
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
 const formatThemeOptions = (value) => {
@@ -598,6 +627,13 @@ const settings = ref({
   show_long_history: false,
   tg_notify: '0',
   expire_reminder: '0',
+  resource_alert_mode: 'continuous',
+  resource_alert_window_minutes: '0',
+  resource_alert_cpu_percent: '80',
+  resource_alert_ram_percent: '80',
+  resource_alert_net_in_mbps: '0',
+  resource_alert_net_out_mbps: '0',
+  resource_alert_net_total_mbps: '0',
   tg_bot_token: '',
   tg_chat_id: '',
   turnstile_enabled: false,
@@ -939,6 +975,13 @@ const loadSettings = async () => {
         show_long_history: settingsData.show_long_history === 'true',
         tg_notify: normalizeTgNotifySetting(settingsData.tg_notify),
         expire_reminder: normalizeExpireReminderSetting(settingsData.expire_reminder),
+        resource_alert_mode: normalizeResourceAlertModeSetting(settingsData.resource_alert_mode),
+        resource_alert_window_minutes: normalizeResourceAlertWindowSetting(settingsData.resource_alert_window_minutes),
+        resource_alert_cpu_percent: normalizeResourceAlertPercentSetting(settingsData.resource_alert_cpu_percent),
+        resource_alert_ram_percent: normalizeResourceAlertPercentSetting(settingsData.resource_alert_ram_percent),
+        resource_alert_net_in_mbps: normalizeResourceAlertMbpsSetting(settingsData.resource_alert_net_in_mbps),
+        resource_alert_net_out_mbps: normalizeResourceAlertMbpsSetting(settingsData.resource_alert_net_out_mbps),
+        resource_alert_net_total_mbps: normalizeResourceAlertMbpsSetting(settingsData.resource_alert_net_total_mbps),
         tg_bot_token: settingsData.tg_bot_token || '',
         tg_chat_id: settingsData.tg_chat_id || '',
         turnstile_enabled: settingsData.turnstile_enabled === 'true',
@@ -1011,7 +1054,7 @@ const saveSettings = async () => {
     }
   }
 
-  if (isTgNotifyEnabled(settings.value.tg_notify) || isExpireReminderEnabled(settings.value.expire_reminder)) {
+  if (isTgNotifyEnabled(settings.value.tg_notify) || isExpireReminderEnabled(settings.value.expire_reminder) || isResourceAlertEnabled(settings.value.resource_alert_window_minutes)) {
     if (!settings.value.tg_bot_token || settings.value.tg_bot_token.trim().length === 0) {
       validationError.value = trans.value.tgBotTokenRequired
       return
@@ -1061,6 +1104,13 @@ const saveSettings = async () => {
       show_long_history: settings.value.show_long_history ? 'true' : 'false',
       tg_notify: normalizeTgNotifySetting(settings.value.tg_notify),
       expire_reminder: normalizeExpireReminderSetting(settings.value.expire_reminder),
+      resource_alert_mode: normalizeResourceAlertModeSetting(settings.value.resource_alert_mode),
+      resource_alert_window_minutes: normalizeResourceAlertWindowSetting(settings.value.resource_alert_window_minutes),
+      resource_alert_cpu_percent: normalizeResourceAlertPercentSetting(settings.value.resource_alert_cpu_percent),
+      resource_alert_ram_percent: normalizeResourceAlertPercentSetting(settings.value.resource_alert_ram_percent),
+      resource_alert_net_in_mbps: normalizeResourceAlertMbpsSetting(settings.value.resource_alert_net_in_mbps),
+      resource_alert_net_out_mbps: normalizeResourceAlertMbpsSetting(settings.value.resource_alert_net_out_mbps),
+      resource_alert_net_total_mbps: normalizeResourceAlertMbpsSetting(settings.value.resource_alert_net_total_mbps),
       tg_bot_token: settings.value.tg_bot_token,
       tg_chat_id: settings.value.tg_chat_id,
       turnstile_enabled: settings.value.turnstile_enabled ? 'true' : 'false',
