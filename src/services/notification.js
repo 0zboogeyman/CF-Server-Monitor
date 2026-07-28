@@ -108,6 +108,7 @@ function getResourceAlertRuleServerIds(rule, servers) {
 
 async function evaluateResourceAlertRule(stub, rule, serverIds) {
   const alerts = [];
+  const evaluatedServerIds = [];
   try {
     for (let offset = 0; offset < serverIds.length; offset += RESOURCE_ALERT_EVALUATE_CHUNK_SIZE) {
       const chunk = serverIds.slice(offset, offset + RESOURCE_ALERT_EVALUATE_CHUNK_SIZE);
@@ -129,12 +130,15 @@ async function evaluateResourceAlertRule(stub, rule, serverIds) {
 
       const result = await response.json();
       if (Array.isArray(result.alerts)) alerts.push(...result.alerts);
+      if (Array.isArray(result.evaluatedServerIds)) {
+        evaluatedServerIds.push(...result.evaluatedServerIds.map(id => String(id)).filter(Boolean));
+      }
     }
   } catch (e) {
     console.warn('[ResourceAlert] DO evaluate failed:', e?.message || e);
     return null;
   }
-  return alerts;
+  return { alerts, evaluatedServerIds };
 }
 
 async function fetchWithRetry(url, options, retries = MAX_RETRIES) {
@@ -377,6 +381,12 @@ export async function checkOfflineNodes(db) {
       }
     }
 
+    if (offlineNodes.length > 0 || recoveredNodes.length > 0) {
+      await db.prepare(
+        'INSERT INTO settings (key, value) VALUES ("alert_state", ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
+      ).bind(JSON.stringify(alertState)).run();
+    }
+
     if (offlineNodes.length > 0) {
       const nodeList = offlineNodes
         .map(n => `• ${n.name} - ${formatLastReportTime(n.lastReportTime)}`)
@@ -389,12 +399,6 @@ export async function checkOfflineNodes(db) {
       const nodeList = recoveredNodes.map(n => `• ${n.name}`).join('\n');
       const msg = `✅ **节点恢复通知** (${recoveredNodes.length}个)\n\n${nodeList}\n\n**时间:** ${new Date().toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}`;
       await sendNotification(siteSettings, msg);
-    }
-
-    if (offlineNodes.length > 0 || recoveredNodes.length > 0) {
-      await db.prepare(
-        'INSERT INTO settings (key, value) VALUES ("alert_state", ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
-      ).bind(JSON.stringify(alertState)).run();
     }
   } catch (e) {
     console.error('离线检测失败:', e);
@@ -451,16 +455,18 @@ export async function checkResourceAlerts(env) {
         ruleServers.push({
           key: getResourceAlertRuleStateKey(rule, serverId),
           rule,
-          server
+          server,
+          serverId: String(serverId)
         });
       }
       if (ruleServers.length === 0) continue;
       configuredRuleServers.push(...ruleServers);
 
-      const alerts = await evaluateResourceAlertRule(stub, rule, serverIds);
-      if (alerts === null) continue;
-      evaluatedRuleServers.push(...ruleServers);
-      for (const alert of alerts) {
+      const result = await evaluateResourceAlertRule(stub, rule, serverIds);
+      if (result === null) continue;
+      const evaluatedServerIdSet = new Set(result.evaluatedServerIds);
+      evaluatedRuleServers.push(...ruleServers.filter(item => evaluatedServerIdSet.has(item.serverId)));
+      for (const alert of result.alerts) {
         activeMap.set(getResourceAlertRuleStateKey(rule, alert.serverId), { rule, alert });
       }
     }
@@ -525,6 +531,7 @@ export async function checkResourceAlerts(env) {
             alertAt: isActiveAlert ? (currentState?.alertAt || now) : now,
             lastNotifyAt: now,
             lastTriggeredAt: now,
+            lastRecoveryNotifyAt: getResourceAlertStateTimestamp(currentState, 'lastRecoveryNotifyAt') || undefined,
             metrics: alert.metrics.map(metric => metric.metric)
           };
           stateChanged = true;
@@ -534,17 +541,23 @@ export async function checkResourceAlerts(env) {
             alertAt: currentState?.alertAt || now,
             lastNotifyAt,
             lastTriggeredAt: now,
+            lastRecoveryNotifyAt: getResourceAlertStateTimestamp(currentState, 'lastRecoveryNotifyAt') || undefined,
             metrics: alert.metrics.map(metric => metric.metric)
           };
           stateChanged = true;
         }
       } else if (currentState) {
         if (currentStatus === RESOURCE_ALERT_STATE_ACTIVE) {
-          recoveredNodes.push({ rule, server });
+          const lastRecoveryNotifyAt = getResourceAlertStateTimestamp(currentState, 'lastRecoveryNotifyAt');
+          const shouldNotifyRecovery = lastRecoveryNotifyAt === 0 || now - lastRecoveryNotifyAt >= cooldownMs;
+          if (shouldNotifyRecovery) {
+            recoveredNodes.push({ rule, server });
+          }
           alertState[key] = {
             ...currentState,
             status: RESOURCE_ALERT_STATE_RECOVERED,
-            recoveredAt: now
+            recoveredAt: now,
+            lastRecoveryNotifyAt: shouldNotifyRecovery ? now : lastRecoveryNotifyAt
           };
           stateChanged = true;
         } else {
@@ -575,15 +588,15 @@ export async function checkResourceAlerts(env) {
       messageSections.push(`✅ **资源负载恢复** (${recoveredNodes.length}个)\n\n${nodeList}`);
     }
 
-    if (messageSections.length > 0) {
-      const msg = `${messageSections.join('\n\n')}\n\n**时间:** ${formatCurrentTime()}`;
-      await sendNotification(siteSettings, msg);
-    }
-
     if (stateChanged) {
       await db.prepare(
         'INSERT INTO settings (key, value) VALUES ("resource_alert_state", ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
       ).bind(JSON.stringify({ signature: configSignature, servers: alertState })).run();
+    }
+
+    if (messageSections.length > 0) {
+      const msg = `${messageSections.join('\n\n')}\n\n**时间:** ${formatCurrentTime()}`;
+      await sendNotification(siteSettings, msg);
     }
   } catch (e) {
     console.error('资源负载告警检测失败:', e);

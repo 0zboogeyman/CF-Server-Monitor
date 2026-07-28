@@ -639,9 +639,10 @@ export class MetricsBroadcaster {
     ].filter(([, threshold]) => threshold > 0);
 
     const alerts = [];
+    const evaluatedServerIds = [];
     if (metricThresholds.length === 0) {
       await this._persistResourceAlertSnapshotIfNeeded(now);
-      return { now, mode, windowMinutes, alerts };
+      return { now, mode, windowMinutes, alerts, evaluatedServerIds };
     }
 
     for (const serverId of body.serverIds || []) {
@@ -654,13 +655,20 @@ export class MetricsBroadcaster {
       if (!latestSample || now - latestSample.ts > getResourceAlertLatestTolerance(samples)) continue;
 
       const metrics = [];
+      let canEvaluateAllMetrics = true;
       for (const [metric, threshold] of metricThresholds) {
         const metricSamples = samples
           .map(sample => ({ sample, value: getMetricValue(sample, metric) }))
           .filter(item => item.value !== null);
-        if (!hasSufficientResourceAlertSamples(metricSamples.map(item => item.sample), windowMinutes)) continue;
+        if (!hasSufficientResourceAlertSamples(metricSamples.map(item => item.sample), windowMinutes)) {
+          canEvaluateAllMetrics = false;
+          break;
+        }
         const summary = summarizeMetric(metricSamples.map(item => item.sample), metric);
-        if (!summary) continue;
+        if (!summary) {
+          canEvaluateAllMetrics = false;
+          break;
+        }
 
         const triggerValue = mode === RESOURCE_ALERT_MODE_AVERAGE ? summary.avg : summary.current;
         const isTriggered = mode === RESOURCE_ALERT_MODE_AVERAGE
@@ -677,6 +685,9 @@ export class MetricsBroadcaster {
         });
       }
 
+      if (!canEvaluateAllMetrics) continue;
+      evaluatedServerIds.push(serverId);
+
       if (metrics.length > 0) {
         alerts.push({
           serverId,
@@ -691,7 +702,7 @@ export class MetricsBroadcaster {
     }
 
     await this._persistResourceAlertSnapshotIfNeeded(now);
-    return { now, mode, windowMinutes, alerts };
+    return { now, mode, windowMinutes, alerts, evaluatedServerIds };
   }
 
   // WebSocket 收到消息（ping 已被自动响应拦截，不会到达此处）
