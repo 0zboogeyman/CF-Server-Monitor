@@ -143,6 +143,7 @@
           @toggle-admin-password-change="toggleAdminPasswordChange"
           @save-settings="saveSettings"
           @upload-bg="uploadBg"
+          @upload-favicon="uploadFavicon"
           @send-test-notification="sendTestNotification"
           @query-d1-usage="queryD1Usage"
         />
@@ -584,6 +585,7 @@ const newServerGroup = ref('')
 const settings = ref({
   site_title: '',
   custom_bg: '',
+  favicon: '',
   custom_head: '',
   custom_script: '',
   display_mode: 'bar',
@@ -924,6 +926,7 @@ const loadSettings = async () => {
       settings.value = {
         site_title: settingsData.site_title || '',
         custom_bg: settingsData.custom_bg || '',
+        favicon: settingsData.favicon || '',
         custom_head: settingsData.custom_head || '',
         custom_script: settingsData.custom_script || '',
         display_mode: resolveDisplayMode(settingsData),
@@ -1043,6 +1046,7 @@ const saveSettings = async () => {
     settings: {
       site_title: settings.value.site_title,
       custom_bg: settings.value.custom_bg,
+      favicon: settings.value.favicon,
       custom_head: settings.value.custom_head,
       custom_script: settings.value.custom_script,
       display_mode: normalizeDisplayMode(settings.value.display_mode),
@@ -1496,7 +1500,7 @@ const handleDrop = async (e, targetId) => {
   draggedRow = null
 }
 
-const uploadBg = (e) => {
+const uploadImageSetting = (e, field) => {
   const file = e.target.files[0]
   if (!file) return
   if (file.size > 800 * 1024) {
@@ -1505,10 +1509,14 @@ const uploadBg = (e) => {
   }
   const reader = new FileReader()
   reader.onload = function(event) {
-    settings.value.custom_bg = event.target.result
+    settings.value[field] = event.target.result
   }
   reader.readAsDataURL(file)
 }
+
+const uploadBg = (e) => uploadImageSetting(e, 'custom_bg')
+
+const uploadFavicon = (e) => uploadImageSetting(e, 'favicon')
 
 const handleUpgradeDatabase = async () => {
   dbOperation.value = 'upgrade'

@@ -289,6 +289,7 @@ export async function cleanupStaleSettings(db) {
       'custom_head',
       'custom_script',
       'custom_bg',
+      'favicon',
       'is_public',
       'show_price',
       'show_expire',
