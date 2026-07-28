@@ -515,7 +515,7 @@ const isExpireReminderEnabled = (value) => normalizeExpireReminderSetting(value)
 
 const normalizeResourceAlertModeSetting = (value) => {
   const mode = String(value || '').trim().toLowerCase()
-  return mode === 'average' ? 'average' : 'continuous'
+  return mode === 'continuous' ? 'continuous' : 'average'
 }
 
 const normalizeResourceAlertIntervalSetting = (value) => {

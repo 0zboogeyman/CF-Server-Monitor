@@ -245,8 +245,8 @@
             <div class="form-group flex-1">
               <label class="form-label">{{ trans.resourceAlertMode }}</label>
               <select v-model="rule.mode" class="form-select">
-                <option value="continuous">{{ trans.resourceAlertModeContinuous }}</option>
                 <option value="average">{{ trans.resourceAlertModeAverage }}</option>
+                <option value="continuous">{{ trans.resourceAlertModeContinuous }}</option>
               </select>
             </div>
           </div>
@@ -629,7 +629,7 @@ const addResourceAlertRule = () => {
     threshold: resourceAlertThresholdPlaceholder(metric),
     servers: resourceAlertServerOptions.value.map(server => server.id),
     intervalMinutes: '5',
-    mode: 'continuous'
+    mode: 'average'
   })
 }
 

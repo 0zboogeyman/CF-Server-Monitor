@@ -155,9 +155,9 @@ export function normalizeResourceAlertMbps(value) {
 
 export function normalizeResourceAlertMode(value) {
   const mode = String(value || '').trim().toLowerCase();
-  return mode === RESOURCE_ALERT_MODE_AVERAGE
-    ? RESOURCE_ALERT_MODE_AVERAGE
-    : RESOURCE_ALERT_MODE_CONTINUOUS;
+  return mode === RESOURCE_ALERT_MODE_CONTINUOUS
+    ? RESOURCE_ALERT_MODE_CONTINUOUS
+    : RESOURCE_ALERT_MODE_AVERAGE;
 }
 
 export function normalizeResourceAlertMetric(value) {

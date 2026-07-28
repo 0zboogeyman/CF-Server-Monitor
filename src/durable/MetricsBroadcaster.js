@@ -104,9 +104,9 @@ function normalizeThresholds(thresholds = {}) {
 }
 
 function normalizeResourceAlertMode(value) {
-  return String(value || '').trim().toLowerCase() === RESOURCE_ALERT_MODE_AVERAGE
-    ? RESOURCE_ALERT_MODE_AVERAGE
-    : RESOURCE_ALERT_MODE_CONTINUOUS;
+  return String(value || '').trim().toLowerCase() === RESOURCE_ALERT_MODE_CONTINUOUS
+    ? RESOURCE_ALERT_MODE_CONTINUOUS
+    : RESOURCE_ALERT_MODE_AVERAGE;
 }
 
 function getMetricValue(sample, metric) {
