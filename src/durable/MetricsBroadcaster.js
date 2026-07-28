@@ -67,6 +67,11 @@ function normalizeResourceAlertSample(sample) {
   const ram = ramTotal && ramTotal > 0 && ramUsed !== null
     ? (ramUsed / ramTotal) * 100
     : null;
+  const diskTotal = toFiniteNumber(metrics.disk_total);
+  const diskUsed = toFiniteNumber(metrics.disk_used);
+  const disk = diskTotal && diskTotal > 0 && diskUsed !== null
+    ? (diskUsed / diskTotal) * 100
+    : null;
   const netIn = Math.max(0, toFiniteNumber(metrics.net_in_speed) ?? 0);
   const netOut = Math.max(0, toFiniteNumber(metrics.net_out_speed) ?? 0);
 
@@ -75,6 +80,7 @@ function normalizeResourceAlertSample(sample) {
     minuteTs: Math.floor(ts / RESOURCE_ALERT_BUCKET_MS) * RESOURCE_ALERT_BUCKET_MS,
     cpu,
     ram,
+    disk,
     netIn,
     netOut,
     netTotal: netIn + netOut
@@ -90,6 +96,7 @@ function normalizeThresholds(thresholds = {}) {
   return {
     cpu: normalize(thresholds.cpuPercent),
     ram: normalize(thresholds.ramPercent),
+    disk: normalize(thresholds.diskPercent),
     netIn: normalize(thresholds.netInBps),
     netOut: normalize(thresholds.netOutBps),
     netTotal: normalize(thresholds.netTotalBps)
@@ -524,15 +531,21 @@ export class MetricsBroadcaster {
 
   _pruneResourceAlertWindows(now = Date.now()) {
     const cutoffMinute = getAlertCutoffMinute(now, RESOURCE_ALERT_MAX_BUCKETS);
+    let changed = false;
     for (const [serverId, window] of this.resourceAlertWindows) {
-      const samples = (window?.samples || [])
+      const originalSamples = Array.isArray(window?.samples) ? window.samples : [];
+      const samples = originalSamples
         .filter(sample => sample && Number(sample.minuteTs) >= cutoffMinute)
         .sort((a, b) => a.minuteTs - b.minuteTs)
         .slice(-RESOURCE_ALERT_MAX_BUCKETS);
 
       if (samples.length === 0) {
         this.resourceAlertWindows.delete(serverId);
+        changed = true;
       } else {
+        const sameSamples = samples.length === originalSamples.length &&
+          samples.every((sample, index) => sample === originalSamples[index]);
+        if (!sameSamples) changed = true;
         this.resourceAlertWindows.set(serverId, { samples });
       }
     }
@@ -541,7 +554,11 @@ export class MetricsBroadcaster {
       const oldestServerId = this.resourceAlertWindows.keys().next().value;
       if (oldestServerId === undefined) break;
       this.resourceAlertWindows.delete(oldestServerId);
+      changed = true;
     }
+
+    if (changed) this.resourceAlertSnapshotDirty = true;
+    return changed;
   }
 
   async _cacheResourceAlertSamples(updates, now = Date.now()) {
@@ -615,6 +632,7 @@ export class MetricsBroadcaster {
     const metricThresholds = [
       ['cpu', thresholds.cpu],
       ['ram', thresholds.ram],
+      ['disk', thresholds.disk],
       ['netIn', thresholds.netIn],
       ['netOut', thresholds.netOut],
       ['netTotal', thresholds.netTotal]
@@ -622,6 +640,7 @@ export class MetricsBroadcaster {
 
     const alerts = [];
     if (metricThresholds.length === 0) {
+      await this._persistResourceAlertSnapshotIfNeeded(now);
       return { now, mode, windowMinutes, alerts };
     }
 
@@ -671,7 +690,7 @@ export class MetricsBroadcaster {
       }
     }
 
-    await this._persistResourceAlertSnapshotIfNeeded(now, true);
+    await this._persistResourceAlertSnapshotIfNeeded(now);
     return { now, mode, windowMinutes, alerts };
   }
 

@@ -187,7 +187,7 @@
           <div class="checkbox-item no-margin">
             <input type="checkbox" v-model="editForm.offline_notify_disabled">
             <label>
-              <b>{{ trans.disableNodeNotify || trans.disableOfflineNotify }}</b>
+              <b>{{ trans.disableOfflineNotify }}</b>
             </label>
           </div>
         </div>
@@ -249,19 +249,10 @@ const normalizeTgNotifySetting = (value) => {
   return '0'
 }
 
-const normalizeResourceAlertWindowSetting = (value) => {
-  const minutes = Number(value)
-  if (Number.isInteger(minutes) && (minutes === 0 || (minutes >= 5 && minutes <= 10))) {
-    return String(minutes)
-  }
-  return '0'
-}
-
 const isOfflineNotifyEnabled = computed(() => normalizeTgNotifySetting(props.settings.tg_notify) !== '0')
-const isResourceAlertEnabled = computed(() => normalizeResourceAlertWindowSetting(props.settings.resource_alert_window_minutes) !== '0')
 const hasNodeNotificationOptions = computed(() => (
   !!props.settings.tg_bot_token &&
-  (isOfflineNotifyEnabled.value || isResourceAlertEnabled.value)
+  isOfflineNotifyEnabled.value
 ))
 
 const normalizePriceInput = () => {

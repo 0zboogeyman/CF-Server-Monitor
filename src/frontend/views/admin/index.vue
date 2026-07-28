@@ -131,6 +131,7 @@
           ref="settingsPanelRef"
           :trans="trans"
           :settings="settings"
+          :servers="servers"
           :password-visible="passwordVisible"
           :active-tab="activeTab"
           :selected-api-base="selectedApiBase"
@@ -512,34 +513,71 @@ const normalizeExpireReminderSetting = (value) => {
 
 const isExpireReminderEnabled = (value) => normalizeExpireReminderSetting(value) !== '0'
 
-const normalizeResourceAlertWindowSetting = (value) => {
-  const minutes = Number(value)
-  if (Number.isInteger(minutes) && (minutes === 0 || (minutes >= 5 && minutes <= 10))) {
-    return String(minutes)
-  }
-  return '0'
-}
-
 const normalizeResourceAlertModeSetting = (value) => {
   const mode = String(value || '').trim().toLowerCase()
   return mode === 'average' ? 'average' : 'continuous'
 }
 
-const normalizeResourceAlertPercentSetting = (value) => {
-  if (value === undefined || value === null || value === '') return '0'
+const normalizeResourceAlertIntervalSetting = (value) => {
+  const minutes = Number(value)
+  if (Number.isInteger(minutes) && minutes >= 5 && minutes <= 10) {
+    return String(minutes)
+  }
+  return '5'
+}
+
+const normalizeResourceAlertMetricSetting = (value) => {
+  const metric = String(value || '').trim()
+  return ['cpu', 'ram', 'disk', 'netIn', 'netOut'].includes(metric) ? metric : 'cpu'
+}
+
+const defaultResourceAlertThreshold = (metric) => (
+  metric === 'netIn' || metric === 'netOut' ? '100' : '80'
+)
+
+const normalizeResourceAlertThresholdSetting = (value, metric) => {
+  if (value === undefined || value === null || value === '') return defaultResourceAlertThreshold(metric)
   const number = Number(value)
-  if (!Number.isFinite(number) || number < 0 || number > 100) return '0'
+  const max = metric === 'netIn' || metric === 'netOut' ? 100000 : 100
+  if (!Number.isFinite(number) || number <= 0 || number > max) return defaultResourceAlertThreshold(metric)
   return String(Math.round(number * 100) / 100)
 }
 
-const normalizeResourceAlertMbpsSetting = (value) => {
-  if (value === undefined || value === null || value === '') return '0'
-  const number = Number(value)
-  if (!Number.isFinite(number) || number < 0 || number > 100000) return '0'
-  return String(Math.round(number * 100) / 100)
+const normalizeResourceAlertServersSetting = (value) => {
+  if (!Array.isArray(value)) return []
+  const seen = new Set()
+  return value.map(item => String(item || '').trim()).filter(id => {
+    if (!id || id.length > 64 || !/^[A-Za-z0-9._:-]+$/.test(id) || seen.has(id)) return false
+    seen.add(id)
+    return true
+  })
 }
 
-const isResourceAlertEnabled = (value) => normalizeResourceAlertWindowSetting(value) !== '0'
+const normalizeResourceAlertRulesSetting = (value) => {
+  let rules = Array.isArray(value) ? value : []
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      const parsed = JSON.parse(value)
+      rules = Array.isArray(parsed) ? parsed : []
+    } catch (_) {
+      rules = []
+    }
+  }
+  return rules.map((rule, index) => {
+    const metric = normalizeResourceAlertMetricSetting(rule?.metric)
+    return {
+      id: String(rule?.id || `rule_${index + 1}`).replace(/[^A-Za-z0-9._:-]/g, '').slice(0, 64) || `rule_${index + 1}`,
+      name: String(rule?.name || '').trim().slice(0, 80) || `Resource Alert ${index + 1}`,
+      metric,
+      threshold: normalizeResourceAlertThresholdSetting(rule?.threshold, metric),
+      servers: normalizeResourceAlertServersSetting(rule?.servers || rule?.serverIds),
+      intervalMinutes: normalizeResourceAlertIntervalSetting(rule?.intervalMinutes || rule?.windowMinutes),
+      mode: normalizeResourceAlertModeSetting(rule?.mode)
+    }
+  }).slice(0, 20)
+}
+
+const isResourceAlertEnabled = (rules) => normalizeResourceAlertRulesSetting(rules).length > 0
 
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
 
@@ -627,13 +665,7 @@ const settings = ref({
   show_long_history: false,
   tg_notify: '0',
   expire_reminder: '0',
-  resource_alert_mode: 'continuous',
-  resource_alert_window_minutes: '0',
-  resource_alert_cpu_percent: '80',
-  resource_alert_ram_percent: '80',
-  resource_alert_net_in_mbps: '0',
-  resource_alert_net_out_mbps: '0',
-  resource_alert_net_total_mbps: '0',
+  resource_alert_rules: [],
   tg_bot_token: '',
   tg_chat_id: '',
   turnstile_enabled: false,
@@ -975,13 +1007,7 @@ const loadSettings = async () => {
         show_long_history: settingsData.show_long_history === 'true',
         tg_notify: normalizeTgNotifySetting(settingsData.tg_notify),
         expire_reminder: normalizeExpireReminderSetting(settingsData.expire_reminder),
-        resource_alert_mode: normalizeResourceAlertModeSetting(settingsData.resource_alert_mode),
-        resource_alert_window_minutes: normalizeResourceAlertWindowSetting(settingsData.resource_alert_window_minutes),
-        resource_alert_cpu_percent: normalizeResourceAlertPercentSetting(settingsData.resource_alert_cpu_percent),
-        resource_alert_ram_percent: normalizeResourceAlertPercentSetting(settingsData.resource_alert_ram_percent),
-        resource_alert_net_in_mbps: normalizeResourceAlertMbpsSetting(settingsData.resource_alert_net_in_mbps),
-        resource_alert_net_out_mbps: normalizeResourceAlertMbpsSetting(settingsData.resource_alert_net_out_mbps),
-        resource_alert_net_total_mbps: normalizeResourceAlertMbpsSetting(settingsData.resource_alert_net_total_mbps),
+        resource_alert_rules: normalizeResourceAlertRulesSetting(settingsData.resource_alert_rules),
         tg_bot_token: settingsData.tg_bot_token || '',
         tg_chat_id: settingsData.tg_chat_id || '',
         turnstile_enabled: settingsData.turnstile_enabled === 'true',
@@ -1054,7 +1080,7 @@ const saveSettings = async () => {
     }
   }
 
-  if (isTgNotifyEnabled(settings.value.tg_notify) || isExpireReminderEnabled(settings.value.expire_reminder) || isResourceAlertEnabled(settings.value.resource_alert_window_minutes)) {
+  if (isTgNotifyEnabled(settings.value.tg_notify) || isExpireReminderEnabled(settings.value.expire_reminder) || isResourceAlertEnabled(settings.value.resource_alert_rules)) {
     if (!settings.value.tg_bot_token || settings.value.tg_bot_token.trim().length === 0) {
       validationError.value = trans.value.tgBotTokenRequired
       return
@@ -1104,13 +1130,7 @@ const saveSettings = async () => {
       show_long_history: settings.value.show_long_history ? 'true' : 'false',
       tg_notify: normalizeTgNotifySetting(settings.value.tg_notify),
       expire_reminder: normalizeExpireReminderSetting(settings.value.expire_reminder),
-      resource_alert_mode: normalizeResourceAlertModeSetting(settings.value.resource_alert_mode),
-      resource_alert_window_minutes: normalizeResourceAlertWindowSetting(settings.value.resource_alert_window_minutes),
-      resource_alert_cpu_percent: normalizeResourceAlertPercentSetting(settings.value.resource_alert_cpu_percent),
-      resource_alert_ram_percent: normalizeResourceAlertPercentSetting(settings.value.resource_alert_ram_percent),
-      resource_alert_net_in_mbps: normalizeResourceAlertMbpsSetting(settings.value.resource_alert_net_in_mbps),
-      resource_alert_net_out_mbps: normalizeResourceAlertMbpsSetting(settings.value.resource_alert_net_out_mbps),
-      resource_alert_net_total_mbps: normalizeResourceAlertMbpsSetting(settings.value.resource_alert_net_total_mbps),
+      resource_alert_rules: normalizeResourceAlertRulesSetting(settings.value.resource_alert_rules),
       tg_bot_token: settings.value.tg_bot_token,
       tg_chat_id: settings.value.tg_chat_id,
       turnstile_enabled: settings.value.turnstile_enabled ? 'true' : 'false',

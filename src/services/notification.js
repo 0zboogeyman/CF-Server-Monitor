@@ -1,10 +1,11 @@
 import { getLatestMetricsForAllServers } from '../database/schema.js';
 import { clearServersListCache, getAllServers } from '../utils/cache.js';
-import { getExpireReminderDays, getResourceAlertConfig, getTgNotifyMinutes, loadSiteSettings, debug } from '../utils/settings.js';
+import { getExpireReminderDays, getResourceAlertConfig, getResourceAlertRuleThresholds, getTgNotifyMinutes, loadSiteSettings, debug } from '../utils/settings.js';
 import { detectBillingCycle, normalizeBillingCycle, renewExpireDateIfNeeded } from '../utils/serverBilling.js';
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
+const RESOURCE_ALERT_EVALUATE_CHUNK_SIZE = 500;
 const RESOURCE_ALERT_STATE_ACTIVE = 'active';
 const RESOURCE_ALERT_STATE_RECOVERED = 'recovered';
 
@@ -17,17 +18,11 @@ function formatLastReportTime(timestamp) {
   return date.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
 }
 
-function formatBytesPerSecond(value) {
+function formatMegabitsPerSecond(value) {
   const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) return '0 B/s';
-  const units = ['B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s'];
-  let size = number;
-  let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex += 1;
-  }
-  return `${size >= 10 ? size.toFixed(1) : size.toFixed(2)} ${units[unitIndex]}`;
+  if (!Number.isFinite(number) || number <= 0) return '0 Mbps';
+  const mbps = number * 8 / 1000 / 1000;
+  return `${mbps >= 10 ? mbps.toFixed(1) : mbps.toFixed(2)} Mbps`;
 }
 
 function formatPercent(value) {
@@ -40,6 +35,7 @@ function formatResourceMetric(metric) {
   const metricLabels = {
     cpu: 'CPU',
     ram: 'RAM',
+    disk: 'DISK',
     netIn: '下行网速',
     netOut: '上行网速',
     netTotal: '总网速'
@@ -47,10 +43,10 @@ function formatResourceMetric(metric) {
   const label = metricLabels[metric.metric] || metric.metric;
   const valueLabel = metric.mode === 'average' ? '平均' : '当前';
   const value = metric.triggerValue ?? metric.current;
-  if (metric.metric === 'cpu' || metric.metric === 'ram') {
+  if (metric.metric === 'cpu' || metric.metric === 'ram' || metric.metric === 'disk') {
     return `${label} ${valueLabel} ${formatPercent(value)} > ${formatPercent(metric.threshold)}`;
   }
-  return `${label} ${valueLabel} ${formatBytesPerSecond(value)} > ${formatBytesPerSecond(metric.threshold)}`;
+  return `${label} ${valueLabel} ${formatMegabitsPerSecond(value)} > ${formatMegabitsPerSecond(metric.threshold)}`;
 }
 
 function parseResourceAlertState(row) {
@@ -80,9 +76,65 @@ function getResourceAlertStateTimestamp(state, key) {
   return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : 0;
 }
 
-function isServerNotificationDisabled(server) {
-  const value = server?.offline_notify_disabled;
-  return value === true || value === 1 || value === '1' || value === 'true';
+function formatCurrentTime() {
+  return new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+}
+
+function getResourceAlertRuleStateKey(rule, serverId) {
+  return `${rule.id}:${serverId}`;
+}
+
+function getResourceAlertRuleName(rule) {
+  return String(rule?.name || '资源负载告警').trim() || '资源负载告警';
+}
+
+function getResourceAlertRuleServerIds(rule, servers) {
+  const allServerIds = servers.map(server => String(server.id)).filter(Boolean);
+  if (!Array.isArray(rule.servers) || rule.servers.length === 0) {
+    return allServerIds;
+  }
+
+  const allowed = new Set(allServerIds);
+  const seen = new Set();
+  const ids = [];
+  for (const serverId of rule.servers) {
+    const id = String(serverId || '').trim();
+    if (!id || !allowed.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id);
+  }
+  return ids;
+}
+
+async function evaluateResourceAlertRule(stub, rule, serverIds) {
+  const alerts = [];
+  try {
+    for (let offset = 0; offset < serverIds.length; offset += RESOURCE_ALERT_EVALUATE_CHUNK_SIZE) {
+      const chunk = serverIds.slice(offset, offset + RESOURCE_ALERT_EVALUATE_CHUNK_SIZE);
+      const response = await stub.fetch('http://internal/evaluate-resource-alerts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          serverIds: chunk,
+          mode: rule.mode,
+          windowMinutes: Number(rule.intervalMinutes),
+          thresholds: getResourceAlertRuleThresholds(rule)
+        })
+      });
+
+      if (!response.ok) {
+        console.warn('[ResourceAlert] DO evaluate failed:', response.status);
+        return null;
+      }
+
+      const result = await response.json();
+      if (Array.isArray(result.alerts)) alerts.push(...result.alerts);
+    }
+  } catch (e) {
+    console.warn('[ResourceAlert] DO evaluate failed:', e?.message || e);
+    return null;
+  }
+  return alerts;
 }
 
 async function fetchWithRetry(url, options, retries = MAX_RETRIES) {
@@ -356,72 +408,103 @@ export async function checkResourceAlerts(env) {
   const siteSettings = await loadSiteSettings(db);
   const resourceConfig = getResourceAlertConfig(siteSettings);
 
-  if (!resourceConfig.enabled || !resourceConfig.hasThresholds || !siteSettings.tg_bot_token) return;
+  if (!resourceConfig.enabled || !resourceConfig.hasRules) {
+    await db.prepare("DELETE FROM settings WHERE key = 'resource_alert_state'").run();
+    return;
+  }
+  if (!siteSettings.tg_bot_token) return;
 
   try {
     const allServers = await getAllServers(db);
-    const alertableServers = allServers.filter(server => !isServerNotificationDisabled(server));
-    const serverIds = alertableServers.map(server => server.id).filter(Boolean);
-    if (serverIds.length === 0) {
+    if (allServers.length === 0) {
       await db.prepare("DELETE FROM settings WHERE key = 'resource_alert_state'").run();
       return;
     }
 
+    const serverMap = new Map(allServers.map(server => [String(server.id), server]));
     const id = env.METRICS_BROADCASTER.idFromName('global');
     const stub = env.METRICS_BROADCASTER.get(id);
-    const response = await stub.fetch('http://internal/evaluate-resource-alerts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        serverIds,
-        mode: resourceConfig.mode,
-        windowMinutes: resourceConfig.windowMinutes,
-        thresholds: resourceConfig.thresholds
-      })
-    });
-
-    if (!response.ok) {
-      console.warn('[ResourceAlert] DO evaluate failed:', response.status);
-      return;
-    }
-
-    const result = await response.json();
-    const activeAlerts = Array.isArray(result.alerts) ? result.alerts : [];
-    const activeMap = new Map(activeAlerts.map(alert => [alert.serverId, alert]));
+    const activeMap = new Map();
+    const configuredRuleServers = [];
+    const evaluatedRuleServers = [];
 
     const configSignature = JSON.stringify({
-      mode: resourceConfig.mode,
-      windowMinutes: resourceConfig.windowMinutes,
-      thresholds: resourceConfig.thresholds
+      rules: resourceConfig.rules.map(rule => ({
+        id: rule.id,
+        name: rule.name,
+        metric: rule.metric,
+        threshold: rule.threshold,
+        servers: rule.servers,
+        intervalMinutes: rule.intervalMinutes,
+        mode: rule.mode
+      }))
     });
+
+    for (const rule of resourceConfig.rules) {
+      const serverIds = getResourceAlertRuleServerIds(rule, allServers);
+      if (serverIds.length === 0) continue;
+
+      const ruleServers = [];
+      for (const serverId of serverIds) {
+        const server = serverMap.get(String(serverId));
+        if (!server) continue;
+        ruleServers.push({
+          key: getResourceAlertRuleStateKey(rule, serverId),
+          rule,
+          server
+        });
+      }
+      if (ruleServers.length === 0) continue;
+      configuredRuleServers.push(...ruleServers);
+
+      const alerts = await evaluateResourceAlertRule(stub, rule, serverIds);
+      if (alerts === null) continue;
+      evaluatedRuleServers.push(...ruleServers);
+      for (const alert of alerts) {
+        activeMap.set(getResourceAlertRuleStateKey(rule, alert.serverId), { rule, alert });
+      }
+    }
+
+    if (configuredRuleServers.length === 0) {
+      await db.prepare("DELETE FROM settings WHERE key = 'resource_alert_state'").run();
+      return;
+    }
 
     const stateRow = await db.prepare(
       "SELECT value FROM settings WHERE key = 'resource_alert_state'"
     ).first();
     const parsedState = parseResourceAlertState(stateRow);
-    let alertState = parsedState.signature === configSignature ? parsedState.servers : {};
+    let alertState = parsedState.servers || {};
 
     const now = Date.now();
-    const cooldownMs = resourceConfig.cooldownMinutes * 60 * 1000;
-    const recoveryCooldownMs = resourceConfig.recoveryCooldownMinutes * 60 * 1000;
+    const cooldownMinutes = Number(resourceConfig.cooldownMinutes);
+    const cooldownMs = (Number.isFinite(cooldownMinutes) && cooldownMinutes > 0
+      ? cooldownMinutes
+      : 60) * 60 * 1000;
     const alertNodes = [];
     const recoveredNodes = [];
+    const validStateKeys = new Set(configuredRuleServers.map(item => item.key));
     let stateChanged = parsedState.signature !== configSignature;
 
-    for (const server of allServers) {
-      if (isServerNotificationDisabled(server)) {
-        if (alertState[server.id]) {
-          delete alertState[server.id];
-          stateChanged = true;
-        }
-        continue;
+    for (const key of Object.keys(alertState)) {
+      if (!validStateKeys.has(key)) {
+        delete alertState[key];
+        stateChanged = true;
       }
+    }
 
-      const alert = activeMap.get(server.id);
-      const currentState = alertState[server.id];
+    for (const { key, rule, server } of evaluatedRuleServers) {
+      const active = activeMap.get(key);
+      const alert = active?.alert;
+      const currentState = alertState[key];
       const currentStatus = currentState
         ? getResourceAlertStateStatus(currentState)
         : '';
+      const intervalMinutes = Number(rule.intervalMinutes);
+      const recoveryCooldownMs = (Number.isFinite(intervalMinutes) && intervalMinutes > 0
+        ? intervalMinutes
+        : 5) * 60 * 1000;
+      const recoveredStateRetentionMs = Math.max(recoveryCooldownMs, cooldownMs);
 
       if (alert) {
         const recoveredAt = currentStatus === RESOURCE_ALERT_STATE_RECOVERED
@@ -432,13 +515,12 @@ export async function checkResourceAlerts(env) {
         }
 
         const isActiveAlert = currentStatus === RESOURCE_ALERT_STATE_ACTIVE;
-        const lastNotifyAt = isActiveAlert
-          ? getResourceAlertStateTimestamp(currentState, 'lastNotifyAt')
-          : 0;
-        const shouldNotify = !currentState || !isActiveAlert || now - lastNotifyAt >= cooldownMs;
+        const lastNotifyAt = getResourceAlertStateTimestamp(currentState, 'lastNotifyAt');
+        const notifyCooldownElapsed = lastNotifyAt === 0 || now - lastNotifyAt >= cooldownMs;
+        const shouldNotify = !currentState || notifyCooldownElapsed;
         if (shouldNotify) {
-          alertNodes.push({ server, alert, repeated: isActiveAlert && !!currentState });
-          alertState[server.id] = {
+          alertNodes.push({ rule, server, alert, repeated: isActiveAlert && !!currentState });
+          alertState[key] = {
             status: RESOURCE_ALERT_STATE_ACTIVE,
             alertAt: isActiveAlert ? (currentState?.alertAt || now) : now,
             lastNotifyAt: now,
@@ -446,42 +528,55 @@ export async function checkResourceAlerts(env) {
             metrics: alert.metrics.map(metric => metric.metric)
           };
           stateChanged = true;
+        } else if (!isActiveAlert) {
+          alertState[key] = {
+            status: RESOURCE_ALERT_STATE_ACTIVE,
+            alertAt: currentState?.alertAt || now,
+            lastNotifyAt,
+            lastTriggeredAt: now,
+            metrics: alert.metrics.map(metric => metric.metric)
+          };
+          stateChanged = true;
         }
       } else if (currentState) {
         if (currentStatus === RESOURCE_ALERT_STATE_ACTIVE) {
-          recoveredNodes.push(server);
-          alertState[server.id] = {
+          recoveredNodes.push({ rule, server });
+          alertState[key] = {
             ...currentState,
             status: RESOURCE_ALERT_STATE_RECOVERED,
-            recoveredAt: now,
-            lastRecoveryNotifyAt: now
+            recoveredAt: now
           };
           stateChanged = true;
         } else {
           const recoveredAt = getResourceAlertStateTimestamp(currentState, 'recoveredAt');
-          if (recoveredAt === 0 || now - recoveredAt >= recoveryCooldownMs) {
-            delete alertState[server.id];
+          if (recoveredAt === 0 || now - recoveredAt >= recoveredStateRetentionMs) {
+            delete alertState[key];
             stateChanged = true;
           }
         }
       }
     }
 
+    const messageSections = [];
     if (alertNodes.length > 0) {
-      const nodeList = alertNodes.map(({ server, alert, repeated }) => {
+      const nodeList = alertNodes.map(({ rule, server, alert, repeated }) => {
         const metrics = alert.metrics.map(formatResourceMetric).join('；');
-        const repeatText = repeated ? '（再次提醒）' : '';
+        const repeatText = repeated ? '（持续提醒）' : '';
         const modeText = alert.mode === 'average' ? '平均' : '窗口样本连续';
-        const sampleText = Number(alert.sampleCount) > 0 ? `，样本 ${alert.sampleCount} 个` : '';
-        return `• ${server.name}${repeatText} - ${modeText} ${alert.windowMinutes} 分钟${sampleText}\n  ${metrics}`;
+        return `• ${getResourceAlertRuleName(rule)} / ${server.name}${repeatText} - ${modeText} ${rule.intervalMinutes} 分钟\n  ${metrics}`;
       }).join('\n');
-      const msg = `⚠️ **资源负载告警** (${alertNodes.length}个)\n\n${nodeList}`;
-      await sendNotification(siteSettings, msg);
+      messageSections.push(`⚠️ **资源负载告警** (${alertNodes.length}个)\n\n${nodeList}`);
     }
 
     if (recoveredNodes.length > 0) {
-      const nodeList = recoveredNodes.map(server => `• ${server.name}`).join('\n');
-      const msg = `✅ **资源负载恢复** (${recoveredNodes.length}个)\n\n${nodeList}\n\n**时间:** ${new Date().toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}`;
+      const nodeList = recoveredNodes
+        .map(({ rule, server }) => `• ${getResourceAlertRuleName(rule)} / ${server.name}`)
+        .join('\n');
+      messageSections.push(`✅ **资源负载恢复** (${recoveredNodes.length}个)\n\n${nodeList}`);
+    }
+
+    if (messageSections.length > 0) {
+      const msg = `${messageSections.join('\n\n')}\n\n**时间:** ${formatCurrentTime()}`;
       await sendNotification(siteSettings, msg);
     }
 

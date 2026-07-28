@@ -1,7 +1,7 @@
 import { checkAuth, simpleAuthResponse, validateCredentials, generateToken } from '../middleware/auth.js';
 import { getLatestMetricsForAllServers } from '../database/schema.js';
 import { getAllServers, clearServersListCache } from '../utils/cache.js';
-import { clearAppearanceSettingsCache, normalizeDisplayMode, normalizeExpireReminder, normalizeResourceAlertMbps, normalizeResourceAlertMode, normalizeResourceAlertPercent, normalizeResourceAlertWindowMinutes, normalizeTgNotify, saveSiteOptions, SITE_FIELDS, APPEARANCE_FIELDS } from '../utils/settings.js';
+import { clearAppearanceSettingsCache, normalizeDisplayMode, normalizeExpireReminder, normalizeResourceAlertRules, normalizeTgNotify, saveSiteOptions, SITE_FIELDS, APPEARANCE_FIELDS } from '../utils/settings.js';
 import { mergeMetricsIntoServer } from '../utils/metrics.js';
 import { verifyTurnstileToken, hashPassword } from '../utils/common.js';
 import { AppError, createSuccessResponse, createBadRequestResponse, createUnauthorizedResponse, createErrorResponse } from '../utils/errors.js';
@@ -545,7 +545,7 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
       // 如果 tg_notify 或 expire_reminder 开启，验证 tg_bot_token 不为空
       const tgNotify = normalizeTgNotify(settings.tg_notify);
       const expireReminder = normalizeExpireReminder(settings.expire_reminder);
-      const resourceAlertEnabled = normalizeResourceAlertWindowMinutes(settings.resource_alert_window_minutes) !== '0';
+      const resourceAlertEnabled = normalizeResourceAlertRules(settings.resource_alert_rules).length > 0;
       if (tgNotify !== '0' || expireReminder !== '0' || resourceAlertEnabled) {
         if (!settings.tg_bot_token || settings.tg_bot_token.trim().length === 0) {
           return createBadRequestResponse('tgBotTokenRequired');
@@ -607,18 +607,8 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
             siteOptions[field] = tgNotify;
           } else if (field === 'expire_reminder') {
             siteOptions[field] = expireReminder;
-          } else if (field === 'resource_alert_mode') {
-            siteOptions[field] = normalizeResourceAlertMode(settings[field]);
-          } else if (field === 'resource_alert_window_minutes') {
-            siteOptions[field] = normalizeResourceAlertWindowMinutes(settings[field]);
-          } else if (field === 'resource_alert_cpu_percent' || field === 'resource_alert_ram_percent') {
-            siteOptions[field] = normalizeResourceAlertPercent(settings[field]);
-          } else if (
-            field === 'resource_alert_net_in_mbps' ||
-            field === 'resource_alert_net_out_mbps' ||
-            field === 'resource_alert_net_total_mbps'
-          ) {
-            siteOptions[field] = normalizeResourceAlertMbps(settings[field]);
+          } else if (field === 'resource_alert_rules') {
+            siteOptions[field] = normalizeResourceAlertRules(settings[field]);
           } else if (field === 'theme_url') {
             siteOptions[field] = normalizedThemeUrl;
           } else {
