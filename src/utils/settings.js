@@ -386,9 +386,10 @@ async function ensurePersistedJwtSecret(db, result, siteOptions) {
   return saveJwtSecretIfMissing(db, secret);
 }
 
-export async function loadSiteSettings(db) {
+export async function loadSiteSettings(db, options = {}) {
+  const forceRefresh = options === true || Boolean(options && options.forceRefresh);
   const now = Date.now();
-  if (cachedSiteSettings && now < siteSettingsCacheExpiry) {
+  if (!forceRefresh && cachedSiteSettings && now < siteSettingsCacheExpiry) {
     debug('Settings缓存命中');
     return cachedSiteSettings;
   }

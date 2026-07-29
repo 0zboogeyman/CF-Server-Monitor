@@ -497,7 +497,7 @@ export async function checkResourceAlerts(env) {
   if (!env?.DB || !env?.METRICS_BROADCASTER) return;
 
   const db = env.DB;
-  const siteSettings = await loadSiteSettings(db);
+  const siteSettings = await loadSiteSettings(db, { forceRefresh: true });
   if (!siteSettings.tg_bot_token) return;
 
   const resourceConfig = getResourceAlertConfig(siteSettings);
