@@ -554,8 +554,6 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
       const normalizedResourceAlertRules = hasResourceAlertRulesInput
         ? normalizeResourceAlertRules(settings.resource_alert_rules)
         : currentResourceAlertRules;
-      const resourceAlertRulesChanged = hasResourceAlertRulesInput &&
-        JSON.stringify(currentResourceAlertRules) !== JSON.stringify(normalizedResourceAlertRules);
       const resourceAlertEnabled = normalizedResourceAlertRules.length > 0;
       if (tgNotify !== '0' || expireReminder !== '0' || resourceAlertEnabled) {
         const effectiveTgBotToken = settings.tg_bot_token !== undefined
@@ -631,7 +629,9 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
         }
       }
       await saveSiteOptions(env.DB, siteOptions);
-      if (hasResourceAlertRulesInput && (!resourceAlertEnabled || resourceAlertRulesChanged)) {
+      // Keep existing states on rule edits so threshold increases can emit recovery notifications.
+      // checkResourceAlerts prunes states for removed rules or servers on the next evaluation.
+      if (hasResourceAlertRulesInput && !resourceAlertEnabled) {
         await clearResourceAlertState(env.DB);
       }
       Object.assign(sys, shouldSaveAppearanceOptions ? appearanceOptions : {}, siteOptions);
