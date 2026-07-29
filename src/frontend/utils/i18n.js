@@ -548,7 +548,7 @@ const translations = reactive({
     notifyOffline: '离线通知延迟',
     notifyOfflineMinutes: '离线 {minutes} 分钟后通知',
     notifyExpireDays: '到期前{days}天内通知',
-    resourceAlert: '资源负载告警',
+    resourceAlert: '资源负载告警（内测中）',
     resourceAlertWindow: '告警时间窗口',
     resourceAlertWindowMinutes: '{minutes} 分钟窗口',
     resourceAlertAddRule: '添加规则',

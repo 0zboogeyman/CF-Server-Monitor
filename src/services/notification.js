@@ -50,15 +50,33 @@ function formatResourceMetric(metric) {
   return `${label} ${valueLabel} ${formatMegabitsPerSecond(value)} > ${formatMegabitsPerSecond(metric.threshold)}`;
 }
 
-function formatStoredResourceMetric(metric) {
-  if (typeof metric === 'string') {
-    const metricLabels = { cpu: 'CPU', ram: 'RAM', disk: 'DISK', netIn: '下行网速', netOut: '上行网速', netTotal: '总网速' };
-    return metricLabels[metric] || metric;
+function getResourceMetricLabel(metric) {
+  const metricLabels = {
+    cpu: 'CPU',
+    ram: 'RAM',
+    disk: 'DISK',
+    netIn: '下行网速',
+    netOut: '上行网速',
+    netTotal: '总网速'
+  };
+  return metricLabels[metric?.metric] || metric?.metric || '';
+}
+
+function formatResourceMetricValue(metric, value) {
+  if (metric?.metric === 'cpu' || metric?.metric === 'ram' || metric?.metric === 'disk') {
+    return formatPercent(value);
   }
-  if (metric && typeof metric === 'object') {
-    return formatResourceMetric(metric);
-  }
-  return '';
+  return formatMegabitsPerSecond(value);
+}
+
+function formatRecoveredResourceMetric(metric) {
+  if (!metric || typeof metric !== 'object') return '';
+  const label = getResourceMetricLabel(metric);
+  const value = metric.current;
+  const valueText = formatResourceMetricValue(metric, value);
+  const thresholdText = formatResourceMetricValue(metric, metric.threshold);
+
+  return `${label} 当前 ${valueText} < ${thresholdText}`;
 }
 
 function parseResourceAlertState(row) {
@@ -127,6 +145,15 @@ function getStoredResourceAlertMetrics(alert) {
   }));
 }
 
+function canRecoverResourceAlert(evaluation) {
+  const metrics = Array.isArray(evaluation?.metrics) ? evaluation.metrics : [];
+  return metrics.length > 0 && metrics.every(metric => {
+    const current = Number(metric?.current);
+    const threshold = Number(metric?.threshold);
+    return Number.isFinite(current) && Number.isFinite(threshold) && current < threshold;
+  });
+}
+
 function getResourceAlertRuleIntervalMs(rule) {
   const minutes = Number(rule?.intervalMinutes);
   const normalizedMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : 5;
@@ -166,6 +193,7 @@ function getResourceAlertRuleServerIds(rule, servers) {
 async function evaluateResourceAlertRule(stub, rule, serverIds) {
   const alerts = [];
   const evaluatedServerIds = [];
+  const evaluations = [];
   try {
     for (let offset = 0; offset < serverIds.length; offset += RESOURCE_ALERT_EVALUATE_CHUNK_SIZE) {
       const chunk = serverIds.slice(offset, offset + RESOURCE_ALERT_EVALUATE_CHUNK_SIZE);
@@ -190,12 +218,15 @@ async function evaluateResourceAlertRule(stub, rule, serverIds) {
       if (Array.isArray(result.evaluatedServerIds)) {
         evaluatedServerIds.push(...result.evaluatedServerIds.map(id => String(id)).filter(Boolean));
       }
+      if (Array.isArray(result.evaluations)) {
+        evaluations.push(...result.evaluations.filter(item => item && item.serverId));
+      }
     }
   } catch (e) {
     console.warn('[ResourceAlert] DO evaluate failed:', e?.message || e);
     return null;
   }
-  return { alerts, evaluatedServerIds };
+  return { alerts, evaluatedServerIds, evaluations };
 }
 
 async function fetchWithRetry(url, options, retries = MAX_RETRIES) {
@@ -487,6 +518,7 @@ export async function checkResourceAlerts(env) {
     const id = env.METRICS_BROADCASTER.idFromName('global');
     const stub = env.METRICS_BROADCASTER.get(id);
     const activeMap = new Map();
+    const evaluationMap = new Map();
     const configuredRuleServers = [];
     const evaluatedRuleServers = [];
 
@@ -527,6 +559,9 @@ export async function checkResourceAlerts(env) {
       for (const alert of result.alerts) {
         activeMap.set(getResourceAlertRuleStateKey(rule, alert.serverId), { rule, alert });
       }
+      for (const evaluation of result.evaluations || []) {
+        evaluationMap.set(getResourceAlertRuleStateKey(rule, evaluation.serverId), evaluation);
+      }
     }
 
     if (configuredRuleServers.length === 0) {
@@ -557,6 +592,7 @@ export async function checkResourceAlerts(env) {
     for (const { key, rule, server } of evaluatedRuleServers) {
       const active = activeMap.get(key);
       const alert = active?.alert;
+      const evaluation = evaluationMap.get(key);
       const currentState = alertState[key];
       const currentStatus = currentState
         ? getResourceAlertStateStatus(currentState)
@@ -596,11 +632,16 @@ export async function checkResourceAlerts(env) {
         }
       } else if (currentState) {
         if (currentStatus === RESOURCE_ALERT_STATE_ACTIVE) {
-          recoveredNodes.push({ rule, server, metrics: currentState.metrics });
+          if (!canRecoverResourceAlert(evaluation)) {
+            continue;
+          }
+
+          recoveredNodes.push({ rule, server, metrics: evaluation?.metrics || [] });
           alertState[key] = {
             ...currentState,
             status: RESOURCE_ALERT_STATE_RECOVERED,
-            recoveredAt: now
+            recoveredAt: now,
+            metrics: evaluation?.metrics || currentState.metrics
           };
           stateChanged = true;
         } else {
@@ -627,7 +668,7 @@ export async function checkResourceAlerts(env) {
       const nodeList = recoveredNodes
         .map(({ rule, server, metrics }) => {
           const metricText = (metrics && metrics.length > 0)
-            ? '\n  ' + metrics.map(formatStoredResourceMetric).filter(Boolean).join('；')
+            ? '\n  ' + metrics.map(formatRecoveredResourceMetric).filter(Boolean).join('；')
             : '';
           return `• ${getResourceAlertRuleName(rule)} / ${server.name}${metricText}`;
         })

@@ -459,7 +459,7 @@
 </template>
 
 <script setup>
-import { computed, reactive } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive } from 'vue'
 import { PING_NODE_FIELDS, validatePingNode } from '../../../utils/pingNode.js'
 
 const props = defineProps({
@@ -594,6 +594,17 @@ const toggleResourceAlertRuleServer = (rule, serverId, checked) => {
   rule.servers = Array.from(selectedSet)
 }
 
+const closeResourceAlertServerDropdowns = (event) => {
+  const target = event?.target
+  if (!(target instanceof Element)) return
+  const currentDropdown = target.closest('.resource-alert-server-dropdown')
+
+  document.querySelectorAll('.resource-alert-server-dropdown[open]').forEach(dropdown => {
+    if (dropdown === currentDropdown) return
+    dropdown.removeAttribute('open')
+  })
+}
+
 const resourceAlertServerSelectLabel = (rule) => {
   const options = resourceAlertServerOptions.value
   const total = options.length
@@ -682,6 +693,14 @@ const validateCspField = (field) => {
   cspErrors[field] = ''
   return true
 }
+
+onMounted(() => {
+  document.addEventListener('click', closeResourceAlertServerDropdowns)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('click', closeResourceAlertServerDropdowns)
+})
 
 defineExpose({ validateCspField, cspErrors, validatePingNodes, pingNodeErrors })
 </script>

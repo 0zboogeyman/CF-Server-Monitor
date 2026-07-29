@@ -658,9 +658,10 @@ export class MetricsBroadcaster {
 
     const alerts = [];
     const evaluatedServerIds = [];
+    const evaluations = [];
     if (metricThresholds.length === 0) {
       await this._persistResourceAlertSnapshotIfNeeded(now);
-      return { now, mode, windowMinutes, alerts, evaluatedServerIds };
+      return { now, mode, windowMinutes, alerts, evaluatedServerIds, evaluations };
     }
 
     for (const serverId of body.serverIds || []) {
@@ -673,6 +674,7 @@ export class MetricsBroadcaster {
       if (!latestSample || now - latestSample.ts > getResourceAlertLatestTolerance(samples)) continue;
 
       const metrics = [];
+      const evaluationMetrics = [];
       let canEvaluateAllMetrics = true;
       for (const [metric, threshold] of metricThresholds) {
         const metricSamples = samples
@@ -692,19 +694,32 @@ export class MetricsBroadcaster {
         const isTriggered = mode === RESOURCE_ALERT_MODE_AVERAGE
           ? triggerValue > threshold
           : metricSamples.every(item => item.value > threshold);
-        if (!isTriggered) continue;
 
-        metrics.push({
+        const metricEvaluation = {
           metric,
           mode,
           threshold,
           triggerValue,
+          triggered: isTriggered,
           ...summary
-        });
+        };
+        evaluationMetrics.push(metricEvaluation);
+        if (isTriggered) {
+          metrics.push(metricEvaluation);
+        }
       }
 
       if (!canEvaluateAllMetrics) continue;
       evaluatedServerIds.push(serverId);
+      evaluations.push({
+        serverId,
+        mode,
+        windowMinutes,
+        sampleCount: samples.length,
+        minSampleRatio: RESOURCE_ALERT_MIN_SAMPLE_RATIO,
+        latestTs: latestSample.ts,
+        metrics: evaluationMetrics
+      });
 
       if (metrics.length > 0) {
         alerts.push({
@@ -720,7 +735,7 @@ export class MetricsBroadcaster {
     }
 
     await this._persistResourceAlertSnapshotIfNeeded(now);
-    return { now, mode, windowMinutes, alerts, evaluatedServerIds };
+    return { now, mode, windowMinutes, alerts, evaluatedServerIds, evaluations };
   }
 
   // WebSocket 收到消息（ping 已被自动响应拦截，不会到达此处）
