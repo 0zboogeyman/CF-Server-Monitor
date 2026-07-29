@@ -24,8 +24,25 @@ async function fetchStaticAsset(request, env, path) {
   if (!env.ASSETS || request.method !== 'GET') return null;
 
   try {
-    const res = await env.ASSETS.fetch(new Request(`http://static${path}`, request));
-    return res.ok ? res : null;
+    const res = await env.ASSETS.fetch(
+      new Request(`http://static${path}`, request)
+    );
+
+    if (!res.ok) return null;
+
+    const headers = new Headers(res.headers);
+
+    headers.set(
+      'Cache-Control',
+      'public, max-age=31536000, immutable'
+    );
+
+    return new Response(res.body, {
+      status: res.status,
+      statusText: res.statusText,
+      headers
+    });
+
   } catch (_) {
     return null;
   }
