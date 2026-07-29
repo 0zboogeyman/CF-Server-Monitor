@@ -8,6 +8,7 @@ const RETRY_DELAY = 1000;
 const RESOURCE_ALERT_EVALUATE_CHUNK_SIZE = 500;
 const RESOURCE_ALERT_STATE_ACTIVE = 'active';
 const RESOURCE_ALERT_STATE_RECOVERED = 'recovered';
+const RESOURCE_ALERT_STATE_KEY = 'resource_alert_state';
 
 function formatLastReportTime(timestamp) {
   if (!timestamp) return '无上报记录';
@@ -49,6 +50,17 @@ function formatResourceMetric(metric) {
   return `${label} ${valueLabel} ${formatMegabitsPerSecond(value)} > ${formatMegabitsPerSecond(metric.threshold)}`;
 }
 
+function formatStoredResourceMetric(metric) {
+  if (typeof metric === 'string') {
+    const metricLabels = { cpu: 'CPU', ram: 'RAM', disk: 'DISK', netIn: '下行网速', netOut: '上行网速', netTotal: '总网速' };
+    return metricLabels[metric] || metric;
+  }
+  if (metric && typeof metric === 'object') {
+    return formatResourceMetric(metric);
+  }
+  return '';
+}
+
 function parseResourceAlertState(row) {
   if (!row || !row.value) return { signature: '', servers: {} };
   try {
@@ -63,6 +75,36 @@ function parseResourceAlertState(row) {
   return { signature: '', servers: {} };
 }
 
+function hasResourceAlertStateEntries(alertState) {
+  return alertState && typeof alertState === 'object' && Object.keys(alertState).length > 0;
+}
+
+function getD1Changes(result) {
+  const changes = Number(result?.meta?.changes ?? result?.changes ?? 0);
+  return Number.isFinite(changes) && changes > 0 ? changes : 0;
+}
+
+export async function clearResourceAlertState(db) {
+  if (!db) return false;
+  const result = await db.prepare(
+    `DELETE FROM settings WHERE key = ?`
+  ).bind(RESOURCE_ALERT_STATE_KEY).run();
+  return getD1Changes(result) > 0;
+}
+
+async function saveResourceAlertState(db, configSignature, alertState, hadStoredState) {
+  if (hasResourceAlertStateEntries(alertState)) {
+    await db.prepare(
+      `INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+    ).bind(RESOURCE_ALERT_STATE_KEY, JSON.stringify({ signature: configSignature, servers: alertState })).run();
+    return;
+  }
+
+  if (hadStoredState) {
+    await clearResourceAlertState(db);
+  }
+}
+
 function getResourceAlertStateStatus(state) {
   if (!state || typeof state !== 'object') return RESOURCE_ALERT_STATE_ACTIVE;
   return state.status === RESOURCE_ALERT_STATE_RECOVERED
@@ -74,6 +116,21 @@ function getResourceAlertStateTimestamp(state, key) {
   if (!state || typeof state !== 'object') return 0;
   const timestamp = Number(state[key] || 0);
   return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : 0;
+}
+
+function getStoredResourceAlertMetrics(alert) {
+  return (alert?.metrics || []).map(m => ({
+    metric: m.metric,
+    mode: m.mode,
+    threshold: m.threshold,
+    triggerValue: m.triggerValue ?? m.current
+  }));
+}
+
+function getResourceAlertRuleIntervalMs(rule) {
+  const minutes = Number(rule?.intervalMinutes);
+  const normalizedMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : 5;
+  return Math.max(5, normalizedMinutes) * 60 * 1000;
 }
 
 function formatCurrentTime() {
@@ -410,18 +467,19 @@ export async function checkResourceAlerts(env) {
 
   const db = env.DB;
   const siteSettings = await loadSiteSettings(db);
+  if (!siteSettings.tg_bot_token) return;
+
   const resourceConfig = getResourceAlertConfig(siteSettings);
 
   if (!resourceConfig.enabled || !resourceConfig.hasRules) {
-    await db.prepare("DELETE FROM settings WHERE key = 'resource_alert_state'").run();
+    await clearResourceAlertState(db);
     return;
   }
-  if (!siteSettings.tg_bot_token) return;
 
   try {
     const allServers = await getAllServers(db);
     if (allServers.length === 0) {
-      await db.prepare("DELETE FROM settings WHERE key = 'resource_alert_state'").run();
+      await clearResourceAlertState(db);
       return;
     }
 
@@ -472,25 +530,22 @@ export async function checkResourceAlerts(env) {
     }
 
     if (configuredRuleServers.length === 0) {
-      await db.prepare("DELETE FROM settings WHERE key = 'resource_alert_state'").run();
+      await clearResourceAlertState(db);
       return;
     }
 
     const stateRow = await db.prepare(
-      "SELECT value FROM settings WHERE key = 'resource_alert_state'"
-    ).first();
+      `SELECT value FROM settings WHERE key = ?`
+    ).bind(RESOURCE_ALERT_STATE_KEY).first();
+    const hadStoredState = !!stateRow;
     const parsedState = parseResourceAlertState(stateRow);
     let alertState = parsedState.servers || {};
 
     const now = Date.now();
-    const cooldownMinutes = Number(resourceConfig.cooldownMinutes);
-    const cooldownMs = (Number.isFinite(cooldownMinutes) && cooldownMinutes > 0
-      ? cooldownMinutes
-      : 60) * 60 * 1000;
     const alertNodes = [];
     const recoveredNodes = [];
     const validStateKeys = new Set(configuredRuleServers.map(item => item.key));
-    let stateChanged = parsedState.signature !== configSignature;
+    let stateChanged = hadStoredState && parsedState.signature !== configSignature;
 
     for (const key of Object.keys(alertState)) {
       if (!validStateKeys.has(key)) {
@@ -506,63 +561,51 @@ export async function checkResourceAlerts(env) {
       const currentStatus = currentState
         ? getResourceAlertStateStatus(currentState)
         : '';
-      const intervalMinutes = Number(rule.intervalMinutes);
-      const recoveryCooldownMs = (Number.isFinite(intervalMinutes) && intervalMinutes > 0
-        ? intervalMinutes
-        : 5) * 60 * 1000;
-      const recoveredStateRetentionMs = Math.max(recoveryCooldownMs, cooldownMs);
+      const ruleIntervalMs = getResourceAlertRuleIntervalMs(rule);
 
       if (alert) {
+        const isActiveAlert = currentStatus === RESOURCE_ALERT_STATE_ACTIVE;
         const recoveredAt = currentStatus === RESOURCE_ALERT_STATE_RECOVERED
           ? getResourceAlertStateTimestamp(currentState, 'recoveredAt')
           : 0;
-        if (recoveredAt > 0 && now - recoveredAt < recoveryCooldownMs) {
+        if (recoveredAt > 0 && now - recoveredAt < ruleIntervalMs) {
           continue;
         }
 
-        const isActiveAlert = currentStatus === RESOURCE_ALERT_STATE_ACTIVE;
-        const lastNotifyAt = getResourceAlertStateTimestamp(currentState, 'lastNotifyAt');
-        const notifyCooldownElapsed = lastNotifyAt === 0 || now - lastNotifyAt >= cooldownMs;
-        const shouldNotify = !currentState || notifyCooldownElapsed;
-        if (shouldNotify) {
-          alertNodes.push({ rule, server, alert, repeated: isActiveAlert && !!currentState });
+        if (!isActiveAlert) {
+          alertNodes.push({ rule, server, alert });
           alertState[key] = {
             status: RESOURCE_ALERT_STATE_ACTIVE,
-            alertAt: isActiveAlert ? (currentState?.alertAt || now) : now,
-            lastNotifyAt: now,
+            alertAt: now,
             lastTriggeredAt: now,
-            lastRecoveryNotifyAt: getResourceAlertStateTimestamp(currentState, 'lastRecoveryNotifyAt') || undefined,
-            metrics: alert.metrics.map(metric => metric.metric)
+            metrics: getStoredResourceAlertMetrics(alert)
           };
           stateChanged = true;
-        } else if (!isActiveAlert) {
-          alertState[key] = {
-            status: RESOURCE_ALERT_STATE_ACTIVE,
-            alertAt: currentState?.alertAt || now,
-            lastNotifyAt,
-            lastTriggeredAt: now,
-            lastRecoveryNotifyAt: getResourceAlertStateTimestamp(currentState, 'lastRecoveryNotifyAt') || undefined,
-            metrics: alert.metrics.map(metric => metric.metric)
-          };
-          stateChanged = true;
+        } else {
+          const lastTriggeredAt = getResourceAlertStateTimestamp(currentState, 'lastTriggeredAt');
+          if (lastTriggeredAt === 0 || now - lastTriggeredAt >= ruleIntervalMs) {
+            alertState[key] = {
+              ...currentState,
+              status: RESOURCE_ALERT_STATE_ACTIVE,
+              alertAt: getResourceAlertStateTimestamp(currentState, 'alertAt') || now,
+              lastTriggeredAt: now,
+              metrics: getStoredResourceAlertMetrics(alert)
+            };
+            stateChanged = true;
+          }
         }
       } else if (currentState) {
         if (currentStatus === RESOURCE_ALERT_STATE_ACTIVE) {
-          const lastRecoveryNotifyAt = getResourceAlertStateTimestamp(currentState, 'lastRecoveryNotifyAt');
-          const shouldNotifyRecovery = lastRecoveryNotifyAt === 0 || now - lastRecoveryNotifyAt >= cooldownMs;
-          if (shouldNotifyRecovery) {
-            recoveredNodes.push({ rule, server });
-          }
+          recoveredNodes.push({ rule, server, metrics: currentState.metrics });
           alertState[key] = {
             ...currentState,
             status: RESOURCE_ALERT_STATE_RECOVERED,
-            recoveredAt: now,
-            lastRecoveryNotifyAt: shouldNotifyRecovery ? now : lastRecoveryNotifyAt
+            recoveredAt: now
           };
           stateChanged = true;
         } else {
           const recoveredAt = getResourceAlertStateTimestamp(currentState, 'recoveredAt');
-          if (recoveredAt === 0 || now - recoveredAt >= recoveredStateRetentionMs) {
+          if (recoveredAt === 0 || now - recoveredAt >= ruleIntervalMs) {
             delete alertState[key];
             stateChanged = true;
           }
@@ -572,31 +615,36 @@ export async function checkResourceAlerts(env) {
 
     const messageSections = [];
     if (alertNodes.length > 0) {
-      const nodeList = alertNodes.map(({ rule, server, alert, repeated }) => {
+      const nodeList = alertNodes.map(({ rule, server, alert }) => {
         const metrics = alert.metrics.map(formatResourceMetric).join('；');
-        const repeatText = repeated ? '（持续提醒）' : '';
         const modeText = alert.mode === 'average' ? '平均' : '窗口样本连续';
-        return `• ${getResourceAlertRuleName(rule)} / ${server.name}${repeatText} - ${modeText} ${rule.intervalMinutes} 分钟\n  ${metrics}`;
+        return `• ${getResourceAlertRuleName(rule)} / ${server.name} - ${modeText} ${rule.intervalMinutes} 分钟\n  ${metrics}`;
       }).join('\n');
       messageSections.push(`⚠️ **资源负载告警** (${alertNodes.length}个)\n\n${nodeList}`);
     }
 
     if (recoveredNodes.length > 0) {
       const nodeList = recoveredNodes
-        .map(({ rule, server }) => `• ${getResourceAlertRuleName(rule)} / ${server.name}`)
+        .map(({ rule, server, metrics }) => {
+          const metricText = (metrics && metrics.length > 0)
+            ? '\n  ' + metrics.map(formatStoredResourceMetric).filter(Boolean).join('；')
+            : '';
+          return `• ${getResourceAlertRuleName(rule)} / ${server.name}${metricText}`;
+        })
         .join('\n');
       messageSections.push(`✅ **资源负载恢复** (${recoveredNodes.length}个)\n\n${nodeList}`);
     }
 
     if (stateChanged) {
-      await db.prepare(
-        'INSERT INTO settings (key, value) VALUES ("resource_alert_state", ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
-      ).bind(JSON.stringify({ signature: configSignature, servers: alertState })).run();
+      await saveResourceAlertState(db, configSignature, alertState, hadStoredState);
     }
 
     if (messageSections.length > 0) {
       const msg = `${messageSections.join('\n\n')}\n\n**时间:** ${formatCurrentTime()}`;
-      await sendNotification(siteSettings, msg);
+      const notificationError = await sendNotification(siteSettings, msg);
+      if (notificationError) {
+        console.warn('[ResourceAlert] notification failed:', notificationError);
+      }
     }
   } catch (e) {
     console.error('资源负载告警检测失败:', e);

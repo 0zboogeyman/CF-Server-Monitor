@@ -22,6 +22,7 @@ const RESOURCE_ALERT_BUCKET_MS = 60 * 1000;
 const RESOURCE_ALERT_MAX_BUCKETS = 10;
 const RESOURCE_ALERT_MAX_SERVERS = 1000;
 const RESOURCE_ALERT_SNAPSHOT_INTERVAL_MS = 60 * 1000;
+const RESOURCE_ALERT_CACHE_ACTIVE_GRACE_MS = 3 * 60 * 1000;
 const RESOURCE_ALERT_LATEST_TOLERANCE_MS = 2 * 60 * 1000;
 const RESOURCE_ALERT_MIN_SAMPLE_RATIO = 0.8;
 const RESOURCE_ALERT_MIN_SAMPLE_COUNT = 3;
@@ -161,6 +162,7 @@ export class MetricsBroadcaster {
     this.resourceAlertSnapshotLoaded = false;
     this.resourceAlertSnapshotDirty = false;
     this.resourceAlertLastSnapshotSave = 0;
+    this.resourceAlertCacheActiveUntil = 0;
 
     // 自动响应 ping 心跳，DO 无需被唤醒
     // @ts-ignore - Cloudflare Workers 运行时提供 WebSocketRequestResponsePair
@@ -319,11 +321,13 @@ export class MetricsBroadcaster {
       }
 
       const reportTs = Date.now();
-      await this._ensureResourceAlertSnapshotLoaded();
-      await this._cacheResourceAlertSamples([{
-        serverId,
-        samples: [{ ts: reportTs, data: payload }]
-      }], reportTs);
+      if (this._shouldCacheResourceAlertSamples(reportTs)) {
+        await this._ensureResourceAlertSnapshotLoaded();
+        await this._cacheResourceAlertSamples([{
+          serverId,
+          samples: [{ ts: reportTs, data: payload }]
+        }], reportTs);
+      }
       this._broadcast(serverId, payload);
       const count = this.state.getWebSockets().length;
       return new Response(JSON.stringify({ ok: true, subscribers: count }), {
@@ -361,8 +365,10 @@ export class MetricsBroadcaster {
       }
 
       const reportTs = Date.now();
-      await this._ensureResourceAlertSnapshotLoaded();
-      await this._cacheResourceAlertSamples(normalizedUpdates, reportTs);
+      if (this._shouldCacheResourceAlertSamples(reportTs)) {
+        await this._ensureResourceAlertSnapshotLoaded();
+        await this._cacheResourceAlertSamples(normalizedUpdates, reportTs);
+      }
       this._cacheLatestReportUpdates(normalizedUpdates, reportTs);
       this._broadcastBatch(normalizedUpdates, reportTs);
 
@@ -420,6 +426,7 @@ export class MetricsBroadcaster {
         });
       }
 
+      this._activateResourceAlertCache();
       await this._ensureResourceAlertSnapshotLoaded();
       const result = await this._evaluateResourceAlerts({
         ...body,
@@ -500,6 +507,17 @@ export class MetricsBroadcaster {
       }
     }
     return updates;
+  }
+
+  _activateResourceAlertCache(now = Date.now()) {
+    this.resourceAlertCacheActiveUntil = Math.max(
+      this.resourceAlertCacheActiveUntil,
+      now + RESOURCE_ALERT_CACHE_ACTIVE_GRACE_MS
+    );
+  }
+
+  _shouldCacheResourceAlertSamples(now = Date.now()) {
+    return now <= this.resourceAlertCacheActiveUntil;
   }
 
   async _ensureResourceAlertSnapshotLoaded() {

@@ -13,7 +13,6 @@ export const TG_NOTIFY_LEGACY_TRUE_MINUTES = 5;
 export const EXPIRE_REMINDER_DAYS_MAX = 7;
 export const RESOURCE_ALERT_WINDOW_MIN = 5;
 export const RESOURCE_ALERT_WINDOW_MAX = 10;
-export const RESOURCE_ALERT_COOLDOWN_MINUTES = 60;
 export const RESOURCE_ALERT_MODE_CONTINUOUS = 'continuous';
 export const RESOURCE_ALERT_MODE_AVERAGE = 'average';
 export const RESOURCE_ALERT_RULES_MAX = 20;
@@ -288,7 +287,6 @@ export function getResourceAlertConfig(settings = {}) {
   return {
     enabled: rules.length > 0,
     rules,
-    cooldownMinutes: RESOURCE_ALERT_COOLDOWN_MINUTES,
     hasRules: rules.length > 0
   };
 }
