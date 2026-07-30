@@ -539,6 +539,46 @@ const hexToRgba = (hex, alpha) => {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`
 }
 
+const getChartTimestamp = (point) => {
+  const ts = Number(point?.x ?? point)
+  return Number.isFinite(ts) ? ts : 0
+}
+
+const createChartPoint = (timestamp, y) => ({
+  x: String(timestamp),
+  y
+})
+
+const formatChartAxisTime = (value) => {
+  const ts = Number(value)
+  if (!Number.isFinite(ts)) return String(value || '')
+  const date = new Date(ts)
+  const pad = (num) => String(num).padStart(2, '0')
+  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  if (currentHours.value <= 1) return `${time}:${pad(date.getSeconds())}`
+  if (currentHours.value <= 3) return time
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${time}`
+}
+
+const syncChartLabels = (chart) => {
+  if (!chart) return
+  const seen = new Set()
+  const labels = []
+  for (const dataset of chart.data.datasets || []) {
+    for (const point of dataset.data || []) {
+      const ts = getChartTimestamp(point)
+      if (!ts) continue
+      const label = String(ts)
+      if (!seen.has(label)) {
+        seen.add(label)
+        labels.push(label)
+      }
+    }
+  }
+  labels.sort((a, b) => Number(a) - Number(b))
+  chart.data.labels = labels
+}
+
 const ds = (label, color, opts = {}) => ({
   label, data: [], borderColor: color,
   backgroundColor: opts.fill ? hexToRgba(color, 0.05) : 'transparent',
@@ -646,7 +686,8 @@ const initCharts = () => {
         callbacks: {
           title: function(items) {
             if (items.length > 0 && items[0].raw) {
-              const date = new Date(items[0].raw.x)
+              const label = items[0].raw.x ?? items[0].chart?.data?.labels?.[items[0].dataIndex]
+              const date = new Date(Number(label))
               return '> ' + date.toLocaleString(undefined, {
                 year: 'numeric',
                 month: '2-digit',
@@ -678,12 +719,7 @@ const initCharts = () => {
     },
     scales: {
       x: {
-        type: 'time',
-        time: {
-          unit: currentHours.value <= 3 ? 'minute' : 'hour',
-          displayFormats: { minute: 'HH:mm', hour: 'MM-dd HH:mm' },
-          tooltipFormat: 'yyyy-MM-dd HH:mm:ss'
-        },
+        type: 'category',
         title: {
           display: false,
           text: '',
@@ -695,7 +731,10 @@ const initCharts = () => {
           color: axisLabelColor,
           font: { size: 9, family: "'JetBrains Mono', monospace" },
           maxRotation: 0,
-          padding: 8
+          padding: 8,
+          callback: function(value) {
+            return formatChartAxisTime(this.getLabelForValue(value))
+          }
         },
         grid: { color: 'rgba(30, 42, 58, 0.5)', drawBorder: false, tickLength: 0 }
       },
@@ -721,7 +760,7 @@ const initCharts = () => {
     if (!ref) continue
     charts[def.key] = new Chart(ref.getContext('2d'), {
       type: 'line',
-      data: { datasets: def.datasets.map(d => ({ ...d })) },
+      data: { labels: [], datasets: def.datasets.map(d => ({ ...d })) },
       options: createChartOptions(def.unit || '', def.legend, def.formatValue, def.tickFormat)
     })
   }
@@ -790,8 +829,10 @@ const applyGapBreak = (data) => {
     result.push(data[i])
     if (i < data.length - 1) {
       if (shouldBreakGap(data[i], data[i + 1])) {
-        const gap = data[i + 1].x - data[i].x
-        result.push({ x: data[i].x + gap / 2, y: null })
+        const currentTime = getChartTimestamp(data[i])
+        const nextTime = getChartTimestamp(data[i + 1])
+        const gap = nextTime - currentTime
+        result.push(createChartPoint(currentTime + gap / 2, null))
       }
     }
   }
@@ -809,10 +850,21 @@ const appendPointWithGapBreak = (data, point) => {
     }
   }
   if (lastPoint && shouldBreakGap(lastPoint, point)) {
-    data.push({ x: lastPoint.x + (point.x - lastPoint.x) / 2, y: null })
+    const lastTime = getChartTimestamp(lastPoint)
+    const pointTime = getChartTimestamp(point)
+    data.push(createChartPoint(lastTime + (pointTime - lastTime) / 2, null))
   }
   data.push(point)
   return data
+}
+
+const getLastDatasetTimestamp = (data) => {
+  if (!Array.isArray(data)) return 0
+  for (let i = data.length - 1; i >= 0; i--) {
+    const x = getChartTimestamp(data[i])
+    if (Number.isFinite(x)) return x
+  }
+  return 0
 }
 
 const sampleData = (dataPoints) => {
@@ -827,27 +879,20 @@ const updateChartDataset = (chart, datasetIndex, dataPoints, yAccessor) => {
   const dataset = chart.data.datasets[datasetIndex]
   if (!dataset) return
 
-  const endTime = Date.now()
-  const startTime = endTime - currentHours.value * 60 * 60 * 1000
-
   let processedData = []
   if (dataPoints && dataPoints.length > 0) {
     const sampledData = sampleData(dataPoints)
 
     processedData = sampledData.map(d => {
-      return { x: new Date(d.timestamp).getTime(), y: yAccessor(d) }
+      return createChartPoint(new Date(d.timestamp).getTime(), yAccessor(d))
     })
 
-    processedData.sort((a, b) => a.x - b.x)
+    processedData.sort((a, b) => getChartTimestamp(a) - getChartTimestamp(b))
     processedData = applyGapBreak(processedData)
   }
 
-  if (chart.options && chart.options.scales && chart.options.scales.x) {
-    chart.options.scales.x.min = startTime
-    chart.options.scales.x.max = endTime
-  }
-
   dataset.data = processedData
+  syncChartLabels(chart)
   chart.update('none')
 }
 
@@ -864,9 +909,6 @@ const fieldAccessor = (field, allowZero = false) => (d) => {
 
 const updateLoadChart = (chart, dataPoints) => {
   if (!chart) return
-
-  const endTime = Date.now()
-  const startTime = endTime - currentHours.value * 60 * 60 * 1000
 
   let processedData = []
   if (dataPoints && dataPoints.length > 0) {
@@ -886,18 +928,14 @@ const updateLoadChart = (chart, dataPoints) => {
     processedData.sort((a, b) => a.x - b.x)
   }
 
-  if (chart.options && chart.options.scales && chart.options.scales.x) {
-    chart.options.scales.x.min = startTime
-    chart.options.scales.x.max = endTime
-  }
-
-  const load1Data = processedData.map(d => ({ x: d.x, y: d.load1 }))
-  const load5Data = processedData.map(d => ({ x: d.x, y: d.load5 }))
-  const load15Data = processedData.map(d => ({ x: d.x, y: d.load15 }))
+  const load1Data = processedData.map(d => createChartPoint(d.x, d.load1))
+  const load5Data = processedData.map(d => createChartPoint(d.x, d.load5))
+  const load15Data = processedData.map(d => createChartPoint(d.x, d.load15))
   
   chart.data.datasets[0].data = applyGapBreak(load1Data)
   chart.data.datasets[1].data = applyGapBreak(load5Data)
   chart.data.datasets[2].data = applyGapBreak(load15Data)
+  syncChartLabels(chart)
   chart.update('none')
 }
 
@@ -991,19 +1029,18 @@ const loadAllHistory = async (hours) => {
 }
 
 const updateAllChartTimeUnits = (hours) => {
-  const unit = hours <= 3 ? 'minute' : 'hour'
   const maxTicks = hours <= 3 ? CHART.MAX_TICKS : CHART.MAX_TICKS_HOUR
-  const endTime = Date.now()
-  const startTime = endTime - hours * 60 * 60 * 1000
 
   Object.values(charts).forEach(chart => {
-    if (chart && chart.options && chart.options.scales && chart.options.scales.x && chart.options.scales.x.time) {
-      chart.options.scales.x.time.unit = unit
+    if (chart?.options?.scales?.x) {
       chart.options.scales.x.ticks.maxTicksLimit = maxTicks
-      chart.options.scales.x.min = startTime
-      chart.options.scales.x.max = endTime
+      delete chart.options.scales.x.min
+      delete chart.options.scales.x.max
     }
-    if (chart) chart.update('none')
+    if (chart) {
+      syncChartLabels(chart)
+      chart.update('none')
+    }
   })
 }
 
@@ -1014,8 +1051,10 @@ const appendDataToChart = (chart, datasetIndex, timestamp, value, isPing = false
   if (!dataset) return
   
   const time = new Date(timestamp).getTime()
-  const endTime = Date.now()
-  const startTime = endTime - currentHours.value * 60 * 60 * 1000
+  const lastTime = getLastDatasetTimestamp(dataset.data)
+  if (lastTime && time <= lastTime) return
+
+  const startTime = Date.now() - currentHours.value * 60 * 60 * 1000
 
   let yVal
   if (isPing) {
@@ -1027,18 +1066,14 @@ const appendDataToChart = (chart, datasetIndex, timestamp, value, isPing = false
     yVal = parseFloat(value) || 0
   }
   
-  dataset.data = appendPointWithGapBreak(dataset.data, { x: time, y: yVal })
+  dataset.data = appendPointWithGapBreak(dataset.data, createChartPoint(time, yVal))
   
   while (dataset.data.length > CHART.MAX_DATA_POINTS) {
     dataset.data.shift()
   }
   
-  dataset.data = dataset.data.filter(d => d.x >= startTime)
-  
-  if (chart.options && chart.options.scales && chart.options.scales.x) {
-    chart.options.scales.x.min = startTime
-    chart.options.scales.x.max = endTime
-  }
+  dataset.data = dataset.data.filter(d => getChartTimestamp(d) >= startTime)
+  syncChartLabels(chart)
   
   chart.update('none')
 }
@@ -1051,22 +1086,20 @@ const appendLoadChartData = (timestamp, loadAvg) => {
 
   const loads = parseLoadAvg(loadAvg)
   const time = new Date(timestamp).getTime()
-  const endTime = Date.now()
-  const startTime = endTime - currentHours.value * 60 * 60 * 1000
+  const lastTime = getLastDatasetTimestamp(chart.data.datasets[0]?.data)
+  if (lastTime && time <= lastTime) return
+
+  const startTime = Date.now() - currentHours.value * 60 * 60 * 1000
 
   for (let i = 0; i < 3; i++) {
-    chart.data.datasets[i].data = appendPointWithGapBreak(chart.data.datasets[i].data, { x: time, y: loads[i] })
+    chart.data.datasets[i].data = appendPointWithGapBreak(chart.data.datasets[i].data, createChartPoint(time, loads[i]))
     while (chart.data.datasets[i].data.length > CHART.MAX_DATA_POINTS) {
       chart.data.datasets[i].data.shift()
     }
-    chart.data.datasets[i].data = chart.data.datasets[i].data.filter(d => d.x >= startTime)
+    chart.data.datasets[i].data = chart.data.datasets[i].data.filter(d => getChartTimestamp(d) >= startTime)
   }
 
-  if (chart.options?.scales?.x) {
-    chart.options.scales.x.min = startTime
-    chart.options.scales.x.max = endTime
-  }
-
+  syncChartLabels(chart)
   chart.update('none')
 }
 
