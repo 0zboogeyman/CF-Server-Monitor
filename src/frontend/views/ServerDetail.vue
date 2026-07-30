@@ -326,7 +326,8 @@ if (indexParam !== undefined && indexParam !== null && !isNaN(parseInt(indexPara
 }
 
 const server = ref({})
-const currentHours = ref(0.167)
+const REALTIME_HISTORY_HOURS = 0.167
+const currentHours = ref(REALTIME_HISTORY_HOURS)
 const lastUpdateText = ref('')
 const config = ref(null)
 const showLoginModal = ref(false)
@@ -343,7 +344,7 @@ const PING_FIELD_DEFS = [
 
 const timeOptions = computed(() => {
   return [
-    { hours: 0.167, label: '10m' },
+    { hours: REALTIME_HISTORY_HOURS, label: '10m' },
     { hours: 0.5, label: '30m' },
     { hours: 1, label: '1h' },
     { hours: 6, label: '6h' },
@@ -972,7 +973,7 @@ const loadAllHistory = async (hours) => {
   } catch (e) {
     if (e && e.status === 401) {
       showLoginModal.value = true
-      currentHours.value = 0.167
+      currentHours.value = REALTIME_HISTORY_HOURS
       historyLoaded.value = true
       return
     }
@@ -1069,6 +1070,8 @@ const appendLoadChartData = (timestamp, loadAvg) => {
   chart.update('none')
 }
 
+const isRealtimeHistoryRange = () => Math.abs(Number(currentHours.value) - REALTIME_HISTORY_HOURS) < 0.001
+
 const fetchCurrentStatus = async (incomingData) => {
   try {
     let data = incomingData
@@ -1094,7 +1097,7 @@ const fetchCurrentStatus = async (incomingData) => {
     }
     syncProbeChartVisibility()
 
-    if (data.last_updated && chartsReady.value) {
+    if (data.last_updated && chartsReady.value && isRealtimeHistoryRange()) {
       const dataTimestamp = new Date(data.last_updated).getTime()
       appendDataToChart(charts.cpu, 0, dataTimestamp, data.cpu)
       rebuildGpuChartDatasets()
