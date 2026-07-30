@@ -20,6 +20,29 @@ function withoutPrivateServerFields(server) {
   return item;
 }
 
+function normalizeLatestReportSample(sample) {
+  if (!sample || typeof sample !== 'object') return null;
+  const data = sample?.data || sample?.payload || sample?.metrics;
+  if (!data || typeof data !== 'object') return null;
+
+  const ts = sample.ts ?? sample.timestamp;
+  return ts === undefined ? { data } : { ts, data };
+}
+
+function normalizeLatestReportUpdate(update) {
+  if (!update || !Array.isArray(update.samples)) return null;
+
+  const samples = update.samples
+    .map(normalizeLatestReportSample)
+    .filter(Boolean);
+  if (samples.length === 0) return null;
+
+  return {
+    ...update,
+    samples
+  };
+}
+
 async function getDurableLatestReportUpdates(env, serverIds) {
   if (!env.METRICS_BROADCASTER || !Array.isArray(serverIds) || serverIds.length === 0) return [];
 
@@ -66,10 +89,13 @@ function mergeLatestReportUpdates(serverIds, durableUpdates, workerUpdates) {
   }
 
   const now = Date.now();
-  return serverIds.map(serverId => merged.get(String(serverId))).filter(Boolean).map(update => ({
-    ...update,
-    reportAgeMs: Math.max(0, now - Number(update.reportTs || now))
-  }));
+  return serverIds.map(serverId => merged.get(String(serverId)))
+    .filter(Boolean)
+    .map(update => normalizeLatestReportUpdate({
+      ...update,
+      reportAgeMs: Math.max(0, now - Number(update.reportTs || now))
+    }))
+    .filter(Boolean);
 }
 
 async function getLatestReportUpdatesForServers(env, serverIds) {

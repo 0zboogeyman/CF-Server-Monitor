@@ -1081,6 +1081,8 @@ const appendDataToChart = (chart, datasetIndex, timestamp, value, isPing = false
 }
 
 const STATIC_FIELDS = ['id', 'name', 'region', 'arch', 'os', 'kernel_version', 'cpu_info', 'cpu_cores', 'gpu_info', 'expire_date', 'server_group', 'traffic_limit', 'net_rx_monthly', 'net_tx_monthly', 'boot_time', 'timestamp', 'ip_v4', 'ip_v6']
+const REALTIME_SAMPLE_FIELDS = new Set(['cpu', 'ram_total', 'ram_used', 'swap_total', 'swap_used', 'net_in_speed', 'net_out_speed'])
+const TIMING_FIELDS = new Set(['last_updated', 'sample_timestamp'])
 
 const appendLoadChartData = (timestamp, loadAvg) => {
   const chart = charts.load
@@ -1119,77 +1121,153 @@ const getReplaySampleData = (sample) => {
   return sample.data || sample.payload || sample.metrics || null
 }
 
+const buildLiveStatusData = (event) => {
+  const receiveTs = Date.now()
+  return {
+    ...event.data,
+    sample_timestamp: event.ts,
+    last_updated: receiveTs,
+    timestamp: receiveTs
+  }
+}
+
 const scheduleLatestReportReplay = (event, delay) => {
   const timer = setTimeout(() => {
     latestReportReplayTimers.delete(timer)
-    const receiveTs = Date.now()
-    fetchCurrentStatus({
-      ...event.data,
-      sample_timestamp: event.ts,
-      last_updated: receiveTs,
-      timestamp: receiveTs
+    fetchCurrentStatus(buildLiveStatusData(event), {
+      mergeMode: 'sample',
+      chartMode: 'sample'
     })
   }, delay)
   latestReportReplayTimers.add(timer)
 }
 
-const replayLatestReportUpdates = (detailData) => {
-  clearLatestReportReplayTimers()
-  if (!isRealtimeHistoryRange()) return
-
-  const updates = Array.isArray(detailData?.latestReportUpdates) ? detailData.latestReportUpdates : []
-  for (const update of updates) {
-    if (!update || String(update.serverId) !== String(serverId)) continue
-    const samples = Array.isArray(update.samples) ? update.samples : []
-    const reportTs = normalizeMetricTimestamp(update.reportTs ?? update.report_timestamp, null)
-    const reportAge = Number(update.reportAgeMs)
-    const reportAgeMs = Math.max(0, Number.isFinite(reportAge)
-      ? reportAge
-      : (reportTs ? Date.now() - reportTs : 0))
-    const events = samples
-      .map(sample => {
-        const data = getReplaySampleData(sample)
-        if (!data) return null
-        const ts = normalizeMetricTimestamp(
-          sample.ts ?? sample.timestamp ?? data.sample_timestamp ?? data.last_updated ?? data.timestamp,
-          null
-        )
-        return ts ? { ts, data, reportTs } : null
-      })
-      .filter(Boolean)
-      .sort((a, b) => a.ts - b.ts)
-
-    if (events.length === 0) continue
-
-    const playbackStartTs = resolvePlaybackCursor(events[0].ts, null, {
-      replayCachedReport: true,
-      reportAgeMs
+const toReplayEvents = (update, messageTs = Date.now()) => {
+  if (!update || String(update.serverId) !== String(serverId)) return []
+  const samples = Array.isArray(update.samples) ? update.samples : []
+  return samples
+    .map(sample => {
+      const data = getReplaySampleData(sample)
+      if (!data) return null
+      const ts = normalizeMetricTimestamp(
+        sample.ts ?? sample.timestamp ?? data.sample_timestamp ?? data.last_updated ?? data.timestamp ?? update.ts ?? messageTs,
+        null
+      )
+      return ts ? { ts, data } : null
     })
-    if (playbackStartTs === null) continue
+    .filter(Boolean)
+    .sort((a, b) => a.ts - b.ts)
+}
 
-    let immediateEvent = null
-    const futureEvents = []
-    for (const event of events) {
-      if (event.ts <= playbackStartTs) {
-        immediateEvent = event
-      } else {
-        futureEvents.push(event)
-      }
-    }
+const replayReportUpdate = (update, { messageTs = Date.now(), replayCachedReport = false, includeReportUpdate = true } = {}) => {
+  const events = toReplayEvents(update, messageTs)
+  if (events.length === 0) return
 
-    if (immediateEvent) {
-      scheduleLatestReportReplay(immediateEvent, 0)
-    }
+  const shouldReplaySamples = isRealtimeHistoryRange()
+  if (includeReportUpdate) {
+    const latestEvent = events[events.length - 1]
+    fetchCurrentStatus(buildLiveStatusData(latestEvent), {
+      mergeMode: shouldReplaySamples ? 'report' : 'all',
+      chartMode: 'report'
+    })
+  }
+  if (!shouldReplaySamples) return
 
-    for (const event of futureEvents) {
-      const delay = Math.max(0, Math.min(event.ts - playbackStartTs, LATEST_REPORT_MAX_REPLAY_DELAY))
-      scheduleLatestReportReplay(event, delay)
+  const reportTs = normalizeMetricTimestamp(update.reportTs ?? update.report_timestamp, messageTs)
+  const reportAge = Number(update.reportAgeMs)
+  const reportAgeMs = Math.max(0, Number.isFinite(reportAge)
+    ? reportAge
+    : (reportTs ? Date.now() - reportTs : 0))
+  const playbackStartTs = replayCachedReport
+    ? resolvePlaybackCursor(events[0].ts, null, { replayCachedReport: true, reportAgeMs })
+    : events[0].ts
+  if (playbackStartTs === null) return
+
+  let immediateEvent = null
+  const futureEvents = []
+  for (const event of events) {
+    if (event.ts <= playbackStartTs) {
+      immediateEvent = event
+    } else {
+      futureEvents.push(event)
     }
+  }
+
+  if (immediateEvent) {
+    scheduleLatestReportReplay(immediateEvent, 0)
+  }
+
+  for (const event of futureEvents) {
+    const delay = Math.max(0, Math.min(event.ts - playbackStartTs, LATEST_REPORT_MAX_REPLAY_DELAY))
+    scheduleLatestReportReplay(event, delay)
   }
 }
 
-const fetchCurrentStatus = async (incomingData) => {
+const replayLatestReportUpdates = (detailData) => {
+  clearLatestReportReplayTimers()
+  const updates = Array.isArray(detailData?.latestReportUpdates) ? detailData.latestReportUpdates : []
+  for (const update of updates) {
+    replayReportUpdate(update, {
+      messageTs: Date.now(),
+      replayCachedReport: true,
+      includeReportUpdate: false
+    })
+  }
+}
+
+const appendRealtimeSampleCharts = (data, dataTimestamp) => {
+  appendDataToChart(charts.cpu, 0, dataTimestamp, data.cpu)
+  const ramPercent = (parseFloat(data.ram_total) > 0) ? (parseFloat(data.ram_used) / parseFloat(data.ram_total)) * 100 : 0
+  appendDataToChart(charts.ram, 0, dataTimestamp, ramPercent)
+  const swapPercent = (parseFloat(data.swap_total) > 0) ? (parseFloat(data.swap_used) / parseFloat(data.swap_total)) * 100 : 0
+  appendDataToChart(charts.ram, 1, dataTimestamp, swapPercent)
+  appendDataToChart(charts.net, 0, dataTimestamp, data.net_in_speed)
+  appendDataToChart(charts.net, 1, dataTimestamp, data.net_out_speed)
+}
+
+const appendReportCharts = (data, dataTimestamp) => {
+  rebuildGpuChartDatasets()
+  const latestGpuList = parseGpuInfo(data.gpu_info)
+  for (let i = 0; i < charts.gpu.data.datasets.length; i++) {
+    const dataset = charts.gpu.data.datasets[i]
+    const gpuId = dataset.gpuId
+    const found = latestGpuList.find(g => String(g.id) === String(gpuId))
+    const gpuVal = found ? found.info : null
+    if (gpuVal === null || gpuVal === undefined) {
+      appendDataToChart(charts.gpu, i, dataTimestamp, null, false, true)
+    } else {
+      appendDataToChart(charts.gpu, i, dataTimestamp, gpuVal)
+    }
+  }
+  const diskPercent = (parseFloat(data.disk_total) > 0) ? (parseFloat(data.disk_used) / parseFloat(data.disk_total)) * 100 : 0
+  appendDataToChart(charts.disk, 0, dataTimestamp, diskPercent)
+  appendDataToChart(charts.proc, 0, dataTimestamp, data.processes)
+  appendDataToChart(charts.conn, 0, dataTimestamp, data.tcp_conn)
+  appendDataToChart(charts.conn, 1, dataTimestamp, data.udp_conn)
+  appendDataToChart(charts.ping, 0, dataTimestamp, data.ping_ct, true)
+  appendDataToChart(charts.ping, 1, dataTimestamp, data.ping_cu, true)
+  appendDataToChart(charts.ping, 2, dataTimestamp, data.ping_cm, true)
+  appendDataToChart(charts.ping, 3, dataTimestamp, data.ping_bd, true)
+  appendDataToChart(charts.loss, 0, dataTimestamp, data.loss_ct, false, true)
+  appendDataToChart(charts.loss, 1, dataTimestamp, data.loss_cu, false, true)
+  appendDataToChart(charts.loss, 2, dataTimestamp, data.loss_cm, false, true)
+  appendDataToChart(charts.loss, 3, dataTimestamp, data.loss_bd, false, true)
+  appendLoadChartData(dataTimestamp, data.load_avg)
+}
+
+const shouldMergeIncomingField = (key, mergeMode) => {
+  if (STATIC_FIELDS.includes(key)) return false
+  if (mergeMode === 'sample') return REALTIME_SAMPLE_FIELDS.has(key) || TIMING_FIELDS.has(key)
+  if (mergeMode === 'report') return !REALTIME_SAMPLE_FIELDS.has(key)
+  return true
+}
+
+const fetchCurrentStatus = async (incomingData, options = {}) => {
   try {
+    const {
+      mergeMode = 'all',
+      chartMode = 'all'
+    } = options
     let data = incomingData
     if (!data) {
       data = await fetchServerDetail(serverId, apiIndex.value)
@@ -1200,7 +1278,7 @@ const fetchCurrentStatus = async (incomingData) => {
     if (incomingData) {
       const newServer = { ...server.value }
       for (const key of Object.keys(data)) {
-        if (STATIC_FIELDS.includes(key)) {
+        if (!shouldMergeIncomingField(key, mergeMode)) {
           continue
         }
         newServer[key] = data[key]
@@ -1215,40 +1293,8 @@ const fetchCurrentStatus = async (incomingData) => {
 
     if (data.last_updated && chartsReady.value && isRealtimeHistoryRange()) {
       const dataTimestamp = new Date(data.last_updated).getTime()
-      appendDataToChart(charts.cpu, 0, dataTimestamp, data.cpu)
-      rebuildGpuChartDatasets()
-      const latestGpuList = parseGpuInfo(data.gpu_info)
-      for (let i = 0; i < charts.gpu.data.datasets.length; i++) {
-        const dataset = charts.gpu.data.datasets[i]
-        const gpuId = dataset.gpuId
-        const found = latestGpuList.find(g => String(g.id) === String(gpuId))
-        const gpuVal = found ? found.info : null
-        if (gpuVal === null || gpuVal === undefined) {
-          appendDataToChart(charts.gpu, i, dataTimestamp, null, false, true)
-        } else {
-          appendDataToChart(charts.gpu, i, dataTimestamp, gpuVal)
-        }
-      }
-      const ramPercent = (parseFloat(data.ram_total) > 0) ? (parseFloat(data.ram_used) / parseFloat(data.ram_total)) * 100 : 0
-      appendDataToChart(charts.ram, 0, dataTimestamp, ramPercent)
-      const swapPercent = (parseFloat(data.swap_total) > 0) ? (parseFloat(data.swap_used) / parseFloat(data.swap_total)) * 100 : 0
-      appendDataToChart(charts.ram, 1, dataTimestamp, swapPercent)
-      const diskPercent = (parseFloat(data.disk_total) > 0) ? (parseFloat(data.disk_used) / parseFloat(data.disk_total)) * 100 : 0
-      appendDataToChart(charts.disk, 0, dataTimestamp, diskPercent)
-      appendDataToChart(charts.proc, 0, dataTimestamp, data.processes)
-      appendDataToChart(charts.net, 0, dataTimestamp, data.net_in_speed)
-      appendDataToChart(charts.net, 1, dataTimestamp, data.net_out_speed)
-      appendDataToChart(charts.conn, 0, dataTimestamp, data.tcp_conn)
-      appendDataToChart(charts.conn, 1, dataTimestamp, data.udp_conn)
-      appendDataToChart(charts.ping, 0, dataTimestamp, data.ping_ct, true)
-      appendDataToChart(charts.ping, 1, dataTimestamp, data.ping_cu, true)
-      appendDataToChart(charts.ping, 2, dataTimestamp, data.ping_cm, true)
-      appendDataToChart(charts.ping, 3, dataTimestamp, data.ping_bd, true)
-      appendDataToChart(charts.loss, 0, dataTimestamp, data.loss_ct, false, true)
-      appendDataToChart(charts.loss, 1, dataTimestamp, data.loss_cu, false, true)
-      appendDataToChart(charts.loss, 2, dataTimestamp, data.loss_cm, false, true)
-      appendDataToChart(charts.loss, 3, dataTimestamp, data.loss_bd, false, true)
-      appendLoadChartData(dataTimestamp, data.load_avg)
+      if (chartMode === 'sample' || chartMode === 'all') appendRealtimeSampleCharts(data, dataTimestamp)
+      if (chartMode === 'report' || chartMode === 'all') appendReportCharts(data, dataTimestamp)
     }
 
     if (data.last_updated) {
@@ -1313,6 +1359,19 @@ const handleVisibility = () => {
   }
 }
 
+const handleLiveMessage = (msg) => {
+  if (!msg || msg.type !== 'batchUpdate') return
+  const updates = Array.isArray(msg.updates) ? msg.updates : []
+  const matchedUpdates = updates.filter(update => update && String(update.serverId) === String(serverId))
+  if (matchedUpdates.length === 0) return
+
+  clearLatestReportReplayTimers()
+  const messageTs = normalizeMetricTimestamp(msg.ts, Date.now())
+  for (const update of matchedUpdates) {
+    replayReportUpdate(update, { messageTs })
+  }
+}
+
 const init = async () => {
   const initialData = await fetchCurrentStatus()
   await initChartsOnMount()
@@ -1321,11 +1380,8 @@ const init = async () => {
   replayLatestReportUpdates(initialData)
 
   liveSocket = createLiveSocket(String(serverId), {
-    onUpdate: ({ serverId: sid, data }) => {
-      if (String(sid) !== String(serverId)) return
-      clearLatestReportReplayTimers()
-      fetchCurrentStatus(data)
-    },
+    replay: false,
+    onMessage: handleLiveMessage,
     onStatus: ({ connected }) => {}
   }, apiIndex.value)
 

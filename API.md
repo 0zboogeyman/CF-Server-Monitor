@@ -439,7 +439,18 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
       "reportTs": 1737638405000,
       "reportAgeMs": 1200,
       "samples": [
-        { "ts": 1737638400000, "data": { "cpu": 12.34, "ram_used": 3700 } }
+        {
+          "ts": 1737638400000,
+          "data": {
+            "cpu": 12.34,
+            "ram_total": 8192,
+            "ram_used": 3700,
+            "swap_total": 1024,
+            "swap_used": 64,
+            "net_in_speed": 1024,
+            "net_out_speed": 512
+          }
+        }
       ]
     }
   ],
@@ -466,7 +477,7 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
 | 字段            | 说明                                                                    |
 | ------------- | --------------------------------------------------------------------- |
 | `servers`     | 已合并最新指标的服务器列表（按 `sort_order ASC`），未登录用户**自动过滤** **`is_hidden = '1'`** |
-| `latestReportUpdates` | 每台服务器最近一次完整批量上报，用于新页面连续回放；来自 Worker/DO 内存缓存，缓存约 5 分钟，进程重启或 DO 回收后允许为空。样本对象在 Worker 本地缓存命中时可能使用 `payload`，经 DO 规范化后使用 `data`，客户端应兼容两者 |
+| `latestReportUpdates` | 每台服务器最近一次批量上报的采样回放数据，用于新页面连续回放；来自 Worker/DO 内存缓存，缓存约 5 分钟，进程重启或 DO 回收后允许为空。REST 响应中的样本统一为 `{ ts, data }`，`data` 按探针批量采样包透传；内置探针默认只在普通采样点上报 `cpu`、`ram_total`、`ram_used`、`swap_total`、`swap_used`、`net_in_speed`、`net_out_speed` |
 | `stats`       | 聚合统计：在线阈值 300 秒（5 分钟无上报视为离线）                                          |
 | `regionStats` | 按 ISO 区域码（大写）统计的服务器数                                                  |
 | `sysConfig`   | 当前站点开关：`show_price`、`show_expire`、`show_tf`、`show_time`、`display_mode`。~~旧版示例中的 `site_title` 不在该对象内。~~（2026-07-26 修订） |
@@ -545,7 +556,18 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
       "reportTs": 1737638405000,
       "reportAgeMs": 1200,
       "samples": [
-        { "ts": 1737638400000, "data": { "cpu": 12.34, "ram_used": 3700 } }
+        {
+          "ts": 1737638400000,
+          "data": {
+            "cpu": 12.34,
+            "ram_total": 8192,
+            "ram_used": 3700,
+            "swap_total": 1024,
+            "swap_used": 64,
+            "net_in_speed": 1024,
+            "net_out_speed": 512
+          }
+        }
       ]
     }
   ],
@@ -554,7 +576,7 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
 ```
 
 > `last_updated` 来自最新指标；`timestamp` 是服务器配置记录的创建/导入时间字段，普通编辑不会刷新它。~~两者都表示最近上报时间。~~（2026-07-26 修订）
-> `latestReportUpdates` 与 `/api/servers` 同名字段形状一致，但仅包含当前服务器最近一次完整批量上报；用于详情页打开时连续回放。缓存约 5 分钟，Worker/DO 重启后允许为空数组。
+> `latestReportUpdates` 与 `/api/servers` 同名字段形状一致，仅包含当前服务器最近一次批量上报的采样回放包；用于详情页打开时连续回放。REST 样本统一为 `{ ts, data }`，`data` 按探针采样包透传。缓存约 5 分钟，Worker/DO 重启后允许为空数组。
 
 **失败返回**：
 
@@ -683,11 +705,11 @@ Sec-WebSocket-Version: 13
          "samples": [
            {
              "ts": 1737638398000,
-             "data": { /* Server 对象 */ }
+             "data": { /* Server 增量字段 */ }
            },
            {
              "ts": 1737638399000,
-             "data": { /* Server 对象 */ }
+             "data": { /* Server 增量字段；批次最后一条包含本次完整报告状态 */ }
            }
          ]
        },
@@ -696,13 +718,15 @@ Sec-WebSocket-Version: 13
          "samples": [
            {
              "ts": 1737638398500,
-             "data": { /* Server 对象 */ }
+             "data": { /* Server 增量字段；批次最后一条包含本次完整报告状态 */ }
            }
          ]
        }
      ]
    }
    ```
+
+   批量样本中的高频采样点主要包含 `cpu`、内存、Swap、网速和时间字段；每次上报的最后一个样本会额外携带报告级字段，用于同步磁盘、GPU、进程、连接数、探针、Ping/丢包等无需按采样率刷新的数据。
 
 **客户端 → 服务端消息**（可选）：
 
@@ -1590,7 +1614,7 @@ UUID 缺失或格式非法时返回 `400 { "error": "invalidServerId", "code": 4
 | `subscribed` | S → C | `{ ts: number, subscribed: string, count: number }` |
 | `ping`   | C → S | 精确文本 `{"type":"ping"}`                       |
 | `pong`   | S → C | 自动响应的精确文本 `{"type":"pong"}`，不带 `ts`   |
-| `batchUpdate` | S → C | `{ ts: number, updates: Array<{ serverId: string, samples: Array<{ ts: number, data: <Server> }> }> }` |
+| `batchUpdate` | S → C | `{ ts: number, updates: Array<{ serverId: string, samples: Array<{ ts: number, data: Partial<Server> }> }> }` |
 
 客户端发来的 `pong` 会被静默忽略；它不是服务端定时发送的双向心跳协议。
 
