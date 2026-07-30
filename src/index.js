@@ -151,7 +151,7 @@ async function fetchHistoryData(env, request, id, hours, columns, sys = null) {
     return simpleAuthResponse();
   }
   
-  if (hours > 1 && !isLoggedIn) {
+  if (hours > 24 && !isLoggedIn) {
     return createUnauthorizedResponse();
   }
   
@@ -359,7 +359,6 @@ export default {
           theme_options: appearanceOptions.theme_options || {},
           verified: verified,
           turnstile_verified: turnstileVerified,
-          show_long_history: sys.show_long_history === 'true',
           long_history_points: Number(normalizeLongHistoryPoints(sys.long_history_points))
         });
       }},

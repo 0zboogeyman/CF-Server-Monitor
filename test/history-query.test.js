@@ -14,9 +14,9 @@ import {
 const TEST_SAMPLE_POINTS = DEFAULT_LONG_HISTORY_POINTS;
 
 test('long-history point settings only accept supported values', () => {
-  assert.equal(normalizeLongHistoryPoints(30), '30');
+  assert.equal(normalizeLongHistoryPoints(30), String(DEFAULT_LONG_HISTORY_POINTS));
   assert.equal(normalizeLongHistoryPoints('120'), '120');
-  assert.equal(normalizeLongHistoryPoints(160), String(DEFAULT_LONG_HISTORY_POINTS));
+  assert.equal(normalizeLongHistoryPoints(240), '240');
   assert.equal(normalizeLongHistoryPoints(undefined), String(DEFAULT_LONG_HISTORY_POINTS));
 });
 

@@ -127,11 +127,6 @@
           </div>
         </div>
 
-        <div class="form-group checkbox-item">
-          <input type="checkbox" id="cfg_show_long_history" v-model="settings.show_long_history">
-          <label>{{ trans.showLongHistory }} <span class="text-muted text-sm">{{ trans.showLongHistoryTip }}</span></label>
-        </div>
-
         <div class="form-group">
           <label class="form-label">{{ trans.longHistoryPoints }}</label>
           <select v-model="settings.long_history_points" class="form-select">

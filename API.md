@@ -395,7 +395,7 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
     "a": 1,
     "b": 2
   },
-  "show_long_history": true
+  "long_history_points": 120
 }
 ```
 
@@ -414,7 +414,7 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
 | `last_workers_version` | string\|null | **仅登录时出现**；远程最新 Workers 版本，来源为 GitHub `version.json`，后端缓存 5 分钟 |
 | `last_agent_version` | string\|null | **仅登录时出现**；远程最新 Agent 版本，来源为 GitHub `version.json`，后端缓存 5 分钟 |
 | `theme_options`      | object       | 第三方主题自定义配置；未配置时为空对象，匿名请求也会返回 |
-| `show_long_history`  | boolean      | 前端长历史显示开关；服务端历史接口仍始终要求 `hours > 1` 的请求携带有效 JWT |
+| `long_history_points` | number      | 长历史查询返回的采样点数，后台可选 `60`、`120`、`180`、`240` |
 
 > ~~`X-Turnstile-Token` 携带且验证成功时，响应头会同步设置 `X-Turnstile-Verified`。~~ **2026-07-26 修订**：当前前端从响应体的 `turnstile_verified` 保存凭证；响应 Header 尚未实际写入。
 
@@ -539,7 +539,7 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
   "boot_time": "1700000000000",
   "last_updated": 1737638400000,
   "timestamp": 1737000000000,
-  "sysConfig": { "show_long_history": true }
+  "sysConfig": { "long_history_points": 120 }
 }
 ```
 
@@ -584,10 +584,10 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
 
 **采样间隔（自动）**
 
-~~旧版按 `≤1 / 1~6 / 6~12 / 12~24 / 24~48 / 48~96 / 96~168` 小时使用固定步长，并把大于 168 的值截断。~~ **2026-07-26 修订**：当前不接受白名单之外的时长；查询以最多约 160 个点动态计算窗口：
+~~旧版按 `≤1 / 1~6 / 6~12 / 12~24 / 24~48 / 48~96 / 96~168` 小时使用固定步长，并把大于 168 的值截断。~~ **2026-07-26 修订**：当前不接受白名单之外的时长；长历史查询按后台 `long_history_points` 配置动态计算窗口，默认 120 个点：
 
 ```text
-intervalMs = max(10_000, ceil(hours * 60 * 60 * 1000 / 160))
+intervalMs = max(10_000, ceil(hours * 60 * 60 * 1000 / long_history_points))
 ```
 
 > 历史查询使用 `ROW_NUMBER() OVER (PARTITION BY ts/interval ORDER BY ts)` 取每个采样窗口的第一条。
@@ -603,7 +603,7 @@ intervalMs = max(10_000, ceil(hours * 60 * 60 * 1000 / 160))
 | ≥ 30  | 3 分钟  |
 | < 30  | 1 分钟  |
 
-**未登录限制**：`hours > 1` 时强制 `401`。
+**未登录限制**：`hours > 24` 时强制 `401`。
 
 **数据库升级提示**：当 D1 缺少新字段时返回：
 
@@ -1043,7 +1043,7 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled` 或
     "show_expire": "true",
     "show_tf": "true",
     "show_time": "true",
-    "show_long_history": "true",
+    "long_history_points": "120",
     "tg_notify": "0",
     "tg_bot_token": "",
     "tg_chat_id": "",
@@ -1068,7 +1068,7 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled` 或
 **字段分类**：
 
 - `APPEARANCE_FIELDS`（写入 `appearance_options` JSON）：`site_title`、`custom_bg`、`custom_head`、`custom_script`、`csp_static`、`csp_api`、`display_mode`、`theme_options`
-- `SITE_FIELDS`（写入 `site_options` JSON）：`is_public`、`show_price`、`show_expire`、`show_tf`、`show_time`、`show_long_history`、通知、Turnstile、账号、Cloudflare、Ping 节点、`expire_reminder`、`theme_url`、历史优化字段等站点级配置
+- `SITE_FIELDS`（写入 `site_options` JSON）：`is_public`、`show_price`、`show_expire`、`show_tf`、`show_time`、`long_history_points`、通知、Turnstile、账号、Cloudflare、Ping 节点、`expire_reminder`、`theme_url`、历史优化字段等站点级配置
 - 任何未列出的字段会被忽略
 
 **特殊处理**：
@@ -1546,7 +1546,7 @@ UUID 缺失或格式非法时返回 `400 { "error": "invalidServerId", "code": 4
   show_expire: 'true' | 'false',
   show_tf: 'true' | 'false',
   show_time: 'true' | 'false',
-  show_long_history: 'true' | 'false',
+  long_history_points: '60' | '120' | '180' | '240',
   tg_notify: '0' | '2' ... '30',    // 0 = 关闭；旧值 false 兼容为 0，true 兼容为 5
   tg_bot_token: string,
   tg_chat_id: string,
@@ -1729,7 +1729,7 @@ curl -X POST https://status.example.com/admin/api \
     "settings":{
       "site_title":"My Status",
       "is_public":"true",
-      "show_long_history":"true",
+      "long_history_points":"120",
       "turnstile_enabled":"true",
       "turnstile_site_key":"1x00000000000000000000AA",
       "turnstile_secret_key":"1x0000000000000000000000000000000AA"

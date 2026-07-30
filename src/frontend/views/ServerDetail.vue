@@ -297,7 +297,7 @@ import Footer from '../components/Footer.vue'
 import OsIcon from '../components/OsIcon.vue'
 import { fetchServerDetail, fetchAllHistory, formatBytes, isAdminLoggedIn, createLiveSocket, getFlagRegionCode, isServerOnline } from '../utils/api.js'
 import { getTrafficUsageBytes } from '../composables/useServerCardData'
-import { hasMultipleApiBases, getPublicAssetUrl } from '../utils/config.js'
+import { getPublicAssetUrl } from '../utils/config.js'
 import Chart from 'chart.js/auto'
 import 'chartjs-adapter-date-fns'
 import { t, currentLang, useTranslation } from '../utils/i18n'
@@ -341,27 +341,18 @@ const PING_FIELD_DEFS = [
   { field: 'ping_bd', lossField: 'loss_bd', labelKey: 'pingBd', className: 'ping-bd', datasetIndex: 3 }
 ]
 
-const isMultipleMode = computed(() => hasMultipleApiBases())
-
 const timeOptions = computed(() => {
-  const options = [
+  return [
     { hours: 0.167, label: '10m' },
     { hours: 0.5, label: '30m' },
     { hours: 1, label: '1h' },
     { hours: 6, label: '6h' },
     { hours: 12, label: '12h' },
     { hours: 24, label: '24h' },
+    { hours: 48, label: '2d' },
+    { hours: 96, label: '4d' },
+    { hours: 168, label: '7d' },
   ]
-
-  if (!isMultipleMode.value && config.value?.show_long_history) {
-    options.push(
-      { hours: 48, label: '2d' },
-      { hours: 96, label: '4d' },
-      { hours: 168, label: '7d' },
-    )
-  }
-
-  return options
 })
 
 const isOnline = computed(() => isServerOnline(server.value))
@@ -1150,7 +1141,7 @@ const fetchCurrentStatus = async (incomingData) => {
 }
 
 const setTimeRange = (hours) => {
-  if (hours > 1 && !isAdminLoggedIn()) {
+  if (hours > 24 && !isAdminLoggedIn()) {
     showLoginModal.value = true
     return
   }
