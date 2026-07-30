@@ -72,6 +72,28 @@ function mergeLatestReportUpdates(serverIds, durableUpdates, workerUpdates) {
   }));
 }
 
+async function getLatestReportUpdatesForServers(env, serverIds) {
+  const normalizedServerIds = Array.from(new Set(
+    (Array.isArray(serverIds) ? serverIds : [])
+      .map(serverId => String(serverId || '').trim())
+      .filter(Boolean)
+  ));
+  if (normalizedServerIds.length === 0) return [];
+
+  const durableLatestReportUpdates = await getDurableLatestReportUpdates(env, normalizedServerIds);
+
+  // DO 命中后反向预热当前 Worker isolate，降低随后 DO 休眠造成的空缓存概率。
+  for (const update of durableLatestReportUpdates) {
+    cacheLatestReportUpdate(update.serverId, update.samples, update.reportTs);
+  }
+
+  return mergeLatestReportUpdates(
+    normalizedServerIds,
+    durableLatestReportUpdates,
+    getWorkerLatestReportUpdates(normalizedServerIds)
+  );
+}
+
 export async function handleServerAPI(request, env, sys) {
   const isLoggedIn = await checkAuth(request, env, sys);
   
@@ -87,8 +109,12 @@ export async function handleServerAPI(request, env, sys) {
   const server = await getServerDetail(env.DB, id, isLoggedIn);
   if (!server) return createNotFoundResponse('Server not found');
   
-  const latestMetrics = await getLatestMetrics(env.DB, id, server);
+  const [latestMetrics, latestReportUpdates] = await Promise.all([
+    getLatestMetrics(env.DB, id, server),
+    getLatestReportUpdatesForServers(env, [id])
+  ]);
   mergeMetricsIntoServer(server, latestMetrics);
+  server.latestReportUpdates = latestReportUpdates;
   server.sysConfig = {
     long_history_points: Number(normalizeLongHistoryPoints(sys.long_history_points))
   };
@@ -106,20 +132,10 @@ export async function handleServersAPI(request, env, sys) {
   const results = (await getAllServers(env.DB, isLoggedIn)).map(withoutPrivateServerFields);
   
   const serverIds = results.map(server => server.id).filter(Boolean);
-  const [latestMetricsMap, durableLatestReportUpdates] = await Promise.all([
+  const [latestMetricsMap, latestReportUpdates] = await Promise.all([
     getLatestMetricsForAllServers(env.DB),
-    getDurableLatestReportUpdates(env, serverIds)
+    getLatestReportUpdatesForServers(env, serverIds)
   ]);
-
-  // DO 命中后反向预热当前 Worker isolate，降低随后 DO 休眠造成的空缓存概率。
-  for (const update of durableLatestReportUpdates) {
-    cacheLatestReportUpdate(update.serverId, update.samples, update.reportTs);
-  }
-  const latestReportUpdates = mergeLatestReportUpdates(
-    serverIds,
-    durableLatestReportUpdates,
-    getWorkerLatestReportUpdates(serverIds)
-  );
   
   const now = Date.now();
   let globalOnline = 0;

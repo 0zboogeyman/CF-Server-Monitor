@@ -302,9 +302,10 @@ import Chart from 'chart.js/auto'
 import 'chartjs-adapter-date-fns'
 import { t, currentLang, useTranslation } from '../utils/i18n'
 import { CHART, HISTORY } from '../utils/constants'
-import { formatDateTime } from '../utils/time.js'
+import { formatDateTime, normalizeTimestamp as normalizeMetricTimestamp } from '../utils/time.js'
 import useTheme from '../composables/useTheme'
 import { isDisabledProbeMetric } from '../utils/server.js'
+import { resolvePlaybackCursor } from '../utils/playback.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -327,6 +328,7 @@ if (indexParam !== undefined && indexParam !== null && !isNaN(parseInt(indexPara
 
 const server = ref({})
 const REALTIME_HISTORY_HOURS = 0.167
+const LATEST_REPORT_MAX_REPLAY_DELAY = 120000
 const currentHours = ref(REALTIME_HISTORY_HOURS)
 const lastUpdateText = ref('')
 const config = ref(null)
@@ -1105,6 +1107,87 @@ const appendLoadChartData = (timestamp, loadAvg) => {
 
 const isRealtimeHistoryRange = () => Math.abs(Number(currentHours.value) - REALTIME_HISTORY_HOURS) < 0.001
 
+let latestReportReplayTimers = new Set()
+
+const clearLatestReportReplayTimers = () => {
+  latestReportReplayTimers.forEach(timer => clearTimeout(timer))
+  latestReportReplayTimers.clear()
+}
+
+const getReplaySampleData = (sample) => {
+  if (!sample || typeof sample !== 'object') return null
+  return sample.data || sample.payload || sample.metrics || null
+}
+
+const scheduleLatestReportReplay = (event, delay) => {
+  const timer = setTimeout(() => {
+    latestReportReplayTimers.delete(timer)
+    const receiveTs = Date.now()
+    fetchCurrentStatus({
+      ...event.data,
+      sample_timestamp: event.ts,
+      last_updated: receiveTs,
+      timestamp: receiveTs
+    })
+  }, delay)
+  latestReportReplayTimers.add(timer)
+}
+
+const replayLatestReportUpdates = (detailData) => {
+  clearLatestReportReplayTimers()
+  if (!isRealtimeHistoryRange()) return
+
+  const updates = Array.isArray(detailData?.latestReportUpdates) ? detailData.latestReportUpdates : []
+  for (const update of updates) {
+    if (!update || String(update.serverId) !== String(serverId)) continue
+    const samples = Array.isArray(update.samples) ? update.samples : []
+    const reportTs = normalizeMetricTimestamp(update.reportTs ?? update.report_timestamp, null)
+    const reportAge = Number(update.reportAgeMs)
+    const reportAgeMs = Math.max(0, Number.isFinite(reportAge)
+      ? reportAge
+      : (reportTs ? Date.now() - reportTs : 0))
+    const events = samples
+      .map(sample => {
+        const data = getReplaySampleData(sample)
+        if (!data) return null
+        const ts = normalizeMetricTimestamp(
+          sample.ts ?? sample.timestamp ?? data.sample_timestamp ?? data.last_updated ?? data.timestamp,
+          null
+        )
+        return ts ? { ts, data, reportTs } : null
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.ts - b.ts)
+
+    if (events.length === 0) continue
+
+    const playbackStartTs = resolvePlaybackCursor(events[0].ts, null, {
+      replayCachedReport: true,
+      reportAgeMs
+    })
+    if (playbackStartTs === null) continue
+
+    let immediateEvent = null
+    const futureEvents = []
+    for (const event of events) {
+      if (event.ts <= playbackStartTs) {
+        immediateEvent = event
+      } else {
+        futureEvents.push(event)
+      }
+    }
+
+    if (immediateEvent) {
+      scheduleLatestReportReplay(immediateEvent, 0)
+    }
+
+    for (const event of futureEvents) {
+      const delay = Math.max(0, Math.min(event.ts - playbackStartTs, LATEST_REPORT_MAX_REPLAY_DELAY))
+      scheduleLatestReportReplay(event, delay)
+    }
+  }
+}
+
 const fetchCurrentStatus = async (incomingData) => {
   try {
     let data = incomingData
@@ -1171,12 +1254,15 @@ const fetchCurrentStatus = async (incomingData) => {
     if (data.last_updated) {
       lastUpdateText.value = formatTimestamp(data.last_updated)
     }
+    return data
   } catch (e) {
     console.error('[ERROR] Update status failed:', e)
+    return null
   }
 }
 
 const setTimeRange = (hours) => {
+  clearLatestReportReplayTimers()
   if (hours > 24 && !isAdminLoggedIn()) {
     showLoginModal.value = true
     return
@@ -1220,6 +1306,7 @@ const initChartsOnMount = async () => {
 const handleVisibility = () => {
   if (!liveSocket) return
   if (document.hidden) {
+    clearLatestReportReplayTimers()
     liveSocket.close()
   } else {
     liveSocket.reconnect()
@@ -1227,14 +1314,16 @@ const handleVisibility = () => {
 }
 
 const init = async () => {
-  await fetchCurrentStatus()
+  const initialData = await fetchCurrentStatus()
   await initChartsOnMount()
 
-  loadAllHistory(currentHours.value)
+  await loadAllHistory(currentHours.value)
+  replayLatestReportUpdates(initialData)
 
   liveSocket = createLiveSocket(String(serverId), {
     onUpdate: ({ serverId: sid, data }) => {
       if (String(sid) !== String(serverId)) return
+      clearLatestReportReplayTimers()
       fetchCurrentStatus(data)
     },
     onStatus: ({ connected }) => {}
@@ -1256,6 +1345,7 @@ onMounted(() => {
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', handleVisibility)
   if (liveSocket) liveSocket.close()
+  clearLatestReportReplayTimers()
   lastGpuSignature = ''
   safeDestroyCharts()
 })

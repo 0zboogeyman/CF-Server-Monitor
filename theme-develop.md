@@ -326,11 +326,21 @@ Headers: (按需) Authorization, X-Turnstile-Token/Verified
   "boot_time": "1700000000000",
   "last_updated": 1737638400000,
   "timestamp": 1737638400000,
+  "latestReportUpdates": [
+    {
+      "serverId": "9b2c...",
+      "reportTs": 1737638405000,
+      "reportAgeMs": 1200,
+      "samples": [
+        { "ts": 1737638400000, "data": { "cpu": 12.34, "ram_used": 3700 } }
+      ]
+    }
+  ],
   "sysConfig": { "long_history_points": 120 }
 }
 ```
 
-`tags` 为英文逗号分隔字符串。`note` 属于管理端内部字段，不从 dashboard 公共接口返回。`gpu` 已废弃，主题应使用 `gpu_info`；新版上报和 WebSocket 实时数据为 `[{ id, name, info }]` 数组，历史/详情 REST 响应中可能是同结构的 JSON 字符串。
+`tags` 为英文逗号分隔字符串。`note` 属于管理端内部字段，不从 dashboard 公共接口返回。`latestReportUpdates` 与 `/api/servers` 同名字段形状一致，但仅包含当前服务器最近一次完整批量上报，用于详情页打开时连续回放；缓存约 5 分钟，允许为空数组。`gpu` 已废弃，主题应使用 `gpu_info`；新版上报和 WebSocket 实时数据为 `[{ id, name, info }]` 数组，历史/详情 REST 响应中可能是同结构的 JSON 字符串。
 
 **失败返回**：
 

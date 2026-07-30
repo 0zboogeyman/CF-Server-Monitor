@@ -539,11 +539,22 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
   "boot_time": "1700000000000",
   "last_updated": 1737638400000,
   "timestamp": 1737000000000,
+  "latestReportUpdates": [
+    {
+      "serverId": "9b2c...",
+      "reportTs": 1737638405000,
+      "reportAgeMs": 1200,
+      "samples": [
+        { "ts": 1737638400000, "data": { "cpu": 12.34, "ram_used": 3700 } }
+      ]
+    }
+  ],
   "sysConfig": { "long_history_points": 120 }
 }
 ```
 
 > `last_updated` 来自最新指标；`timestamp` 是服务器配置记录的创建/导入时间字段，普通编辑不会刷新它。~~两者都表示最近上报时间。~~（2026-07-26 修订）
+> `latestReportUpdates` 与 `/api/servers` 同名字段形状一致，但仅包含当前服务器最近一次完整批量上报；用于详情页打开时连续回放。缓存约 5 分钟，Worker/DO 重启后允许为空数组。
 
 **失败返回**：
 
