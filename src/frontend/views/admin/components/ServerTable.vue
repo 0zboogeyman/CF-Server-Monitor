@@ -79,11 +79,18 @@
               </div>
             </td>
             <td>
-              <span
-                class="spec-text"
+              <div
+                v-if="getServerIpRows(server).length"
+                class="server-ip-list"
                 :class="{ 'spec-copied': isSpecCopied(server, 'ip') }"
-                @dblclick.stop="emitCopySpec(server, 'ip', server.ip)"
-              >{{ server.ip || '-' }}</span>
+                @dblclick.stop="emitCopySpec(server, 'ip', formatServerIps(server))"
+              >
+                <span v-for="ipItem in getServerIpRows(server)" :key="ipItem.label" class="server-ip-line">
+                  <span class="server-ip-label">{{ ipItem.label }}</span>
+                  <span v-if="ipItem.address" class="server-ip-value">{{ ipItem.address }}</span>
+                </span>
+              </div>
+              <span v-else>-</span>
             </td>
             <td>{{ server.server_group || trans.default }}</td>
             <td>
@@ -193,6 +200,23 @@ const splitTags = (value) => String(value || '')
   .map(tag => tag.trim())
   .filter(Boolean)
 const tagColorClass = (index) => `tag-color-${index % 6}`
+const normalizePublicIpValue = (value) => String(value ?? '').trim()
+const isPublicIpAvailable = (value) => {
+  const normalized = normalizePublicIpValue(value)
+  return normalized !== '' && normalized !== '0' && normalized.toLowerCase() !== 'false'
+}
+const getPublicIpAddress = (value) => {
+  const normalized = normalizePublicIpValue(value)
+  if (!isPublicIpAvailable(normalized) || normalized === '1') return ''
+  return normalized
+}
+const getServerIpRows = (server) => [
+  { label: 'V4', address: getPublicIpAddress(server.ip_v4), available: isPublicIpAvailable(server.ip_v4) },
+  { label: 'V6', address: getPublicIpAddress(server.ip_v6), available: isPublicIpAvailable(server.ip_v6) }
+].filter(item => item.available)
+const formatServerIps = (server) => getServerIpRows(server)
+  .map(item => item.address ? `${item.label}: ${item.address}` : item.label)
+  .join('\n')
 const trimDisplayPrice = (price) => String(price || '').replace(/\.00$/, '')
 const formatServerPrice = (server) => {
   const price = normalizePrice(server.price)

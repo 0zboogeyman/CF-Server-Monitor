@@ -215,7 +215,6 @@ export async function addHistoryColumns(db) {
       os: "TEXT DEFAULT ''",
       kernel_version: "TEXT DEFAULT ''",
       region: "TEXT DEFAULT ''",
-      ip: "TEXT DEFAULT ''",
       ip_v4: "TEXT DEFAULT '0'",
       ip_v6: "TEXT DEFAULT '0'",
       boot_time: "TEXT DEFAULT ''",

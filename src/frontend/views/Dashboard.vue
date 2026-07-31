@@ -82,7 +82,6 @@
           {{ formattedRemainingValue.symbol }}{{ formattedRemainingValue.value }}
           <span class="finance-currency-code">{{ formattedRemainingValue.currency }}</span>
         </div>
-        <div class="stat-sub-info finance-stat-sub-info">{{ trans.configuredPrices }}:{{ financeSummary.configuredCount }}</div>
       </button>
     </div>
 

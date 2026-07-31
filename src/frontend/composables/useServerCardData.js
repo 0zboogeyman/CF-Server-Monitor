@@ -115,6 +115,8 @@ export function useServerCardData(props) {
     .filter(Boolean)
   )
   const tagColorClass = (index) => `tag-color-${index % 6}`
+  const hasPublicIPv4 = computed(() => String(props.server.ip_v4 ?? '').trim() === '1')
+  const hasPublicIPv6 = computed(() => String(props.server.ip_v6 ?? '').trim() === '1')
 
   const netInSpeed = computed(() => formatBytes(props.server.net_in_speed))
   const netOutSpeed = computed(() => formatBytes(props.server.net_out_speed))
@@ -289,6 +291,8 @@ export function useServerCardData(props) {
     trafficLimitText,
     tagList,
     tagColorClass,
+    hasPublicIPv4,
+    hasPublicIPv6,
     netInSpeed,
     netOutSpeed,
     totalRx,

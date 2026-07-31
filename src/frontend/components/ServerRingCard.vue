@@ -25,10 +25,10 @@
         </div>
         <div class="card-badges">
           <span v-for="(tag, index) in tagList" :key="tag" :class="['badge', 'badge-tag', tagColorClass(index)]">{{ tag }}</span>
-          <span v-if="server.ip_v4 === '1' && server.ip_v6 === '1'" class="badge badge-v4-v6">IPv4/6</span>
+          <span v-if="hasPublicIPv4 && hasPublicIPv6" class="badge badge-v4-v6">IPv4/6</span>
           <template v-else>
-            <span v-if="server.ip_v4 === '1'" class="badge badge-v4">IPv4</span>
-            <span v-if="server.ip_v6 === '1'" class="badge badge-v6">IPv6</span>
+            <span v-if="hasPublicIPv4" class="badge badge-v4">IPv4</span>
+            <span v-if="hasPublicIPv6" class="badge badge-v6">IPv6</span>
           </template>
         </div>
       </div>
@@ -177,6 +177,8 @@ const {
   getPublicAssetUrl,
   tagList,
   tagColorClass,
+  hasPublicIPv4,
+  hasPublicIPv6,
   isExpired,
   expireText
 } = useServerCardData(props)

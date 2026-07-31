@@ -960,28 +960,28 @@ function Remove-PingBackgroundJob {
 # IP 检测
 # ============================================================
 
-function Test-PublicIPv4 {
+function Get-PublicIPv4 {
     try {
         $ip = (Invoke-RestMethod -Uri "https://ipv4.icanhazip.com" -TimeoutSec 3 -ErrorAction Stop).Trim()
-        if ($ip -match '\.') { return $true }
+        if ($ip -match '\.') { return $ip }
     } catch {}
     try {
         $ip = (Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 3 -ErrorAction Stop).Trim()
-        if ($ip -match '\.') { return $true }
+        if ($ip -match '\.') { return $ip }
     } catch {}
-    return $false
+    return "0"
 }
 
-function Test-PublicIPv6 {
+function Get-PublicIPv6 {
     try {
         $ip = (Invoke-RestMethod -Uri "https://ipv6.icanhazip.com" -TimeoutSec 3 -ErrorAction Stop).Trim()
-        if ($ip -match ':') { return $true }
+        if ($ip -match ':') { return $ip }
     } catch {}
     try {
         $ip = (Invoke-RestMethod -Uri "https://api64.ipify.org" -TimeoutSec 3 -ErrorAction Stop).Trim()
-        if ($ip -match ':') { return $true }
+        if ($ip -match ':') { return $ip }
     } catch {}
-    return $false
+    return "0"
 }
 
 # ============================================================
@@ -1440,8 +1440,8 @@ function Start-TimerCollectLoop {
 
             # IP 检测（每 10 分钟）
             if ($now - $script:cs_lastIpCheck -ge 600 -or $script:cs_lastIpCheck -eq 0) {
-                $script:cs_ipV4 = if (Test-PublicIPv4) { "1" } else { "0" }
-                $script:cs_ipV6 = if (Test-PublicIPv6) { "1" } else { "0" }
+                $script:cs_ipV4 = Get-PublicIPv4
+                $script:cs_ipV6 = Get-PublicIPv6
                 $script:cs_lastIpCheck = $now
             }
 
