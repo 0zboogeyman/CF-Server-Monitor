@@ -919,6 +919,7 @@ const logout = async () => {
   latestAgentVersion.value = ''
   clearTurnstile()
   await loadTurnstileConfig()
+  window.location.href = '/'
 }
 
 const checkLoginStatus = () => {
