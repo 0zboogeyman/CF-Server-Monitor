@@ -58,7 +58,7 @@
 - 🔑 **JWT 认证**：登录系统采用 JWT token 认证，支持自定义密钥
 - 🛡️ **CSP 安全策略**：默认限制第三方静态资源加载，可在后台按需添加可信白名单
 - 🎨 **主题商店**：后台可选择第三方主题和版本，Workers 仅反代主题 `index.html` 与 `assets/`
-- 📉 **额度查询**：后台可查询 Cloudflare D1 当日读写行数与 Workers 请求量
+- 📉 **额度查询**：后台可查询 Cloudflare D1 与 Workers 当日/昨天用量
 - ⚡ **实时推送**：基于 Durable Objects + WebSocket，探针上报后页面立即刷新，无轮询延迟
 
 ## 🚀 快速开始
@@ -425,12 +425,12 @@ Workers 环境下 CSP 会放在 HTTP Response Header 中返回，并同时设置
 
 ### Cloudflare 额度查询（可选）
 
-如需在后台查询 D1 当日读写额度和 Workers 请求量：
+如需在后台查询 D1 读写额度和 Workers 请求量：
 
 1. 在 [Cloudflare Dashboard](https://dash.cloudflare.com/?to=/:account/workers-and-pages)右下角复制当前账户的 **Account ID**
 2. 在[API Tokens 页面](https://dash.cloudflare.com/profile/api-tokens)创建具备 **Account Analytics Read** 权限的 Cloudflare API Token
 3. 在管理后台 → 全局设置 → Cloudflare 设置中填入 Account ID 和 API Token
-4. 保存后点击 **查询 D1 额度** 查看 UTC 当日用量与下次重置时间
+4. 保存后点击 **查询 D1 额度** 查看 UTC 当日与昨天用量
 
 </details>
 

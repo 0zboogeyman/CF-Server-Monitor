@@ -189,7 +189,7 @@
 ### 0.5 限流与配额
 
 - ~~Cloudflare Workers / D1 固定限制为 D1 500 万行读、10 万行写、Workers 10 万次请求/日。~~ **2026-07-26 修订**：配额取决于 Cloudflare 当前套餐与计费策略，不属于本项目 API 的固定契约，应以 Cloudflare Dashboard 和官方文档为准。
-- `/admin/api?action=d1_usage` 可查询当前账户当日用量与近 24h 用量。
+- `/admin/api?action=d1_usage` 可查询当前账户 UTC 当日用量与 UTC 昨日用量。
 
 ### 0.6 CORS
 
@@ -1027,7 +1027,7 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled` 或
       "rowsWritten": 678,
       "workersRequests": 1234
     },
-    "last24Hours": {
+    "yesterday": {
       "rowsRead": 23456,
       "rowsWritten": 789,
       "workersRequests": 2345
@@ -1038,6 +1038,8 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled` 或
 ```
 
 > ~~响应会返回日期、套餐限额、剩余额度、数据库数量和 Account ID。~~ **2026-07-26 修订**：当前只返回两个时间范围的 `rowsRead`、`rowsWritten`、`workersRequests`；额度由前端自行展示，不属于 API 响应。
+>
+> **统计窗口**：`today` 为 UTC 当日 `00:00:00` 至 `23:59:59`；`yesterday` 为 UTC 昨日 `00:00:00` 至 `23:59:59`。
 
 **Response 失败**
 

@@ -234,12 +234,15 @@ function getUtcTodayRange() {
   };
 }
 
-function getLast24HoursRange() {
+function getUtcYesterdayRange() {
   const now = new Date();
-  const end = now;
-  const start = new Date(now.getTime() - 86400000);
+  const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const start = new Date(todayStart.getTime() - 86400000);
+  const end = new Date(todayStart.getTime() - 1);
   return {
-    date: start.toISOString().slice(0, 10) + ' ~ ' + end.toISOString().slice(0, 10),
+    date: start.toISOString().slice(0, 10),
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
     startTime: start.toISOString(),
     endTime: end.toISOString()
   };
@@ -263,7 +266,7 @@ async function cloudflareGraphql(query, variables, token) {
 }
 
 async function fetchCloudflareUsage(token, accountId, range) {
-  const query = `query CloudflareUsage($accountTag: string!, $start: Date, $end: Date, $startTime: string, $endTime: string) {
+  const query = `query CloudflareUsage($accountTag: string!, $start: Date, $end: Date, $startTime: Time!, $endTime: Time!) {
     viewer {
       accounts(filter: { accountTag: $accountTag }) {
         d1AnalyticsAdaptiveGroups(
@@ -284,8 +287,8 @@ async function fetchCloudflareUsage(token, accountId, range) {
   }`;
   const data = await cloudflareGraphql(query, {
     accountTag: accountId,
-    start: range.start || range.startTime.slice(0, 10),
-    end: range.end || range.endTime.slice(0, 10),
+    start: range.start,
+    end: range.end,
     startTime: range.startTime,
     endTime: range.endTime
   }, token);
@@ -307,12 +310,18 @@ async function getD1DailyUsage(token, accountId) {
   if (!accountId) throw new Error('cloudflareAccountIdRequired');
 
   const todayRange = getUtcTodayRange();
-  const last24Range = getLast24HoursRange();
+  const yesterdayRange = getUtcYesterdayRange();
 
-  const [todayUsage, last24Usage] = await Promise.all([
+  const [todayUsage, yesterdayUsage] = await Promise.all([
     fetchCloudflareUsage(token, accountId, todayRange),
-    fetchCloudflareUsage(token, accountId, last24Range)
+    fetchCloudflareUsage(token, accountId, yesterdayRange)
   ]);
+
+  const yesterday = {
+    rowsRead: yesterdayUsage.rowsRead,
+    rowsWritten: yesterdayUsage.rowsWritten,
+    workersRequests: yesterdayUsage.workersRequests
+  };
 
   return {
     today: {
@@ -320,11 +329,7 @@ async function getD1DailyUsage(token, accountId) {
       rowsWritten: todayUsage.rowsWritten,
       workersRequests: todayUsage.workersRequests
     },
-    last24Hours: {
-      rowsRead: last24Usage.rowsRead,
-      rowsWritten: last24Usage.rowsWritten,
-      workersRequests: last24Usage.workersRequests
-    }
+    yesterday
   };
 }
 
