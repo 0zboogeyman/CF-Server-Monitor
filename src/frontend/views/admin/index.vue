@@ -704,7 +704,13 @@ const clearAdminPasswordInputs = () => {
   settings.value.confirm_password = ''
 }
 
+const isAdminUsernameEmpty = () => !String(settings.value.username || '').trim()
+
 const toggleAdminPasswordChange = () => {
+  if (isAdminUsernameEmpty()) {
+    changeAdminPassword.value = true
+    return
+  }
   changeAdminPassword.value = !changeAdminPassword.value
   if (!changeAdminPassword.value) {
     clearAdminPasswordInputs()
@@ -1042,13 +1048,22 @@ const loadSettings = async () => {
         csp_static: settingsData.csp_static || '',
         csp_api: settingsData.csp_api || ''
       }
-      changeAdminPassword.value = false
+      changeAdminPassword.value = !String(settings.value.username || '').trim()
       apiSecret.value = data.api_secret || ''
     }
   } catch (e) {
     console.error('[ERROR] Load settings failed:', e)
   }
 }
+
+watch(
+  () => settings.value.username,
+  () => {
+    if (isAdminUsernameEmpty()) {
+      changeAdminPassword.value = true
+    }
+  }
+)
 
 const saveSettings = async () => {
   if (saving.value) return

@@ -124,6 +124,26 @@ export function useServerCardData(props) {
   const totalTxMonthly = computed(() => formatBytes(props.server.net_tx_monthly))
   const priceText = computed(() => formatBillingPrice(props.server, currentLang.value))
 
+  const formatDateOnly = (value) => {
+    const raw = String(value || '').trim()
+    if (!raw) return ''
+    const dateOnly = raw.match(/^(\d{4}-\d{2}-\d{2})/)?.[1]
+    if (dateOnly) return dateOnly
+
+    const date = new Date(raw)
+    if (Number.isNaN(date.getTime())) return ''
+    return [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, '0'),
+      String(date.getDate()).padStart(2, '0')
+    ].join('-')
+  }
+
+  const expireDateTitle = computed(() => {
+    const expireDate = formatDateOnly(props.server.expire_date)
+    return expireDate ? `${trans.value.expirationDate || 'Expiration Date'}: ${expireDate}` : ''
+  })
+
   const loadAvg = computed(() => {
     const raw = String(props.server.load_avg || '').trim()
     if (!raw) return [0, 0, 0]
@@ -276,6 +296,7 @@ export function useServerCardData(props) {
     totalRxMonthly,
     totalTxMonthly,
     priceText,
+    expireDateTitle,
     loadAvg,
     uptimeText,
     ramUsageText,

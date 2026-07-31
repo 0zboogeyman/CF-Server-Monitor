@@ -17,7 +17,10 @@
     <div class="server-meta">
       <div class="card-meta">
         <div v-if="sysConfig.show_price && priceText" class="card-meta-item">💰 {{ priceText }}</div>
-        <div v-if="sysConfig.show_expire && server.expire_date" class="card-meta-item">📅 <span :class="{ 'expired': isExpired }">{{ expireText }}</span></div>
+        <div v-if="sysConfig.show_expire && server.expire_date" class="card-meta-item card-meta-expire">
+          📅 <span :class="{ 'expired': isExpired }">{{ expireText }}</span>
+          <span v-if="expireDateTitle" class="card-meta-tooltip">{{ expireDateTitle }}</span>
+        </div>
       </div>
       <div class="card-badges">
         <span v-for="(tag, index) in tagList" :key="tag" :class="['badge', 'badge-tag', tagColorClass(index)]">{{ tag }}</span>
@@ -125,6 +128,7 @@ const {
   totalRxMonthly,
   totalTxMonthly,
   priceText,
+  expireDateTitle,
   loadAvg,
   dataTimeText,
   isExpired,

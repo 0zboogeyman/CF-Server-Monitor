@@ -36,8 +36,6 @@
             <th>{{ trans.tags.toUpperCase() }}</th>
             <th>{{ trans.note.toUpperCase() }}</th>
             <th>{{ trans.price.toUpperCase() }}</th>
-            <th>{{ trans.currency.toUpperCase() }}</th>
-            <th>{{ trans.billingCycle.toUpperCase() }}</th>
             <th>{{ trans.expirationDate.toUpperCase() }}</th>
             <th>{{ trans.autoRenewal.toUpperCase() }}</th>
             <th>{{ trans.traffic.toUpperCase() }}</th>
@@ -48,7 +46,7 @@
         </thead>
         <tbody>
           <tr v-if="servers.length === 0">
-            <td colspan="16" class="empty-state"><span class="empty-icon">📦</span> {{ trans.noServers }}</td>
+            <td colspan="14" class="empty-state"><span class="empty-icon">📦</span> {{ trans.noServers }}</td>
           </tr>
           <tr
             v-for="server in servers"
@@ -87,7 +85,7 @@
                 @dblclick.stop="emitCopySpec(server, 'ip', server.ip)"
               >{{ server.ip || '-' }}</span>
             </td>
-            <td><span class="group-tag">{{ server.server_group || trans.default }}</span></td>
+            <td>{{ server.server_group || trans.default }}</td>
             <td>
               <div v-if="splitTags(server.tags).length" class="tag-list admin-tag-list">
                 <span v-for="(tag, index) in splitTags(server.tags)" :key="tag" :class="['badge', 'badge-tag', tagColorClass(index)]">{{ tag }}</span>
@@ -101,20 +99,12 @@
                 @dblclick.stop="$emit('copy-note', server)"
               >{{ server.note || '-' }}</span>
             </td>
-            <td><span class="price-tag">{{ formatServerPrice(server) }}</span></td>
             <td>
               <span
                 class="spec-text"
-                :class="{ 'spec-copied': isSpecCopied(server, 'currency') }"
-                @dblclick.stop="emitCopySpec(server, 'currency', formatServerCurrency(server))"
-              >{{ formatServerCurrency(server) }}</span>
-            </td>
-            <td>
-              <span
-                class="spec-text"
-                :class="{ 'spec-copied': isSpecCopied(server, 'billing_cycle') }"
-                @dblclick.stop="emitCopySpec(server, 'billing_cycle', formatServerBillingCycle(server))"
-              >{{ formatServerBillingCycle(server) }}</span>
+                :class="{ 'spec-copied': isSpecCopied(server, 'price') }"
+                @dblclick.stop="emitCopySpec(server, 'price', formatServerPrice(server))"
+              >{{ formatServerPrice(server) }}</span>
             </td>
             <td><span class="date-text">{{ server.expire_date || '-' }}</span></td>
             <td>
@@ -203,21 +193,15 @@ const splitTags = (value) => String(value || '')
   .map(tag => tag.trim())
   .filter(Boolean)
 const tagColorClass = (index) => `tag-color-${index % 6}`
+const trimDisplayPrice = (price) => String(price || '').replace(/\.00$/, '')
 const formatServerPrice = (server) => {
   const price = normalizePrice(server.price)
   if (!price) return '-'
-  return isFreePrice(price) ? props.trans.free : price
-}
-const formatServerCurrency = (server) => {
-  const price = normalizePrice(server.price)
-  if (!price || isFreePrice(price)) return '-'
-  return normalizeCurrency(server.currency || detectCurrencySymbol(server.price)) || '-'
-}
-const formatServerBillingCycle = (server) => {
-  const price = normalizePrice(server.price)
-  if (!price || isFreePrice(price)) return '-'
+  if (isFreePrice(price)) return props.trans.free
+  const currency = normalizeCurrency(server.currency || detectCurrencySymbol(server.price))
   const option = getBillingCycleOption(detectBillingCycle(server.price) || server.billing_cycle)
-  return currentLang.value === 'zh' ? option.shortLabelZh : option.shortLabelEn
+  const cycleLabel = currentLang.value === 'zh' ? option.shortLabelZh : option.shortLabelEn
+  return `${currency}${trimDisplayPrice(price)}/${cycleLabel}`
 }
 const isServerAutoRenewal = (server) => isEnabledFlag(server.auto_renewal)
 const normalizeVersion = (version) => String(version || '').trim()
