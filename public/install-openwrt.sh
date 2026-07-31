@@ -10,7 +10,7 @@
 
 set -eu
 
-AGENT_VERSION="1.3.5"
+AGENT_VERSION="1.3.6"
 
 # 路径定义（配置文件系统）
 CONFIG_DIR="/etc/config/cf-probe"
@@ -68,6 +68,7 @@ print_usage() {
     echo "  -cu=HOST       自定义CU测试节点"
     echo "  -cm=HOST       自定义CM测试节点"
     echo "  -bd=HOST       自定义BD测试节点"
+    echo "  -interface=IFACES 指定网卡统计，多个用英文逗号分隔，默认自动汇总"
     echo "  -reset_day=N   流量重置日(1-31, 0=不重置)，默认1"
     echo "  -auto_update=0|1 自动更新探针，默认0"
     echo "  -rx_correction=N  下行流量校正(GB)，覆盖当月下行数据"
@@ -76,6 +77,7 @@ print_usage() {
     echo "示例:"
     echo "  sh $0 install -id=server123 -secret=abc123 -url=https://worker.example.com"
     echo "  sh $0 install -id=server123 -secret=abc123 -url=https://worker.example.com -interval=30"
+    echo "  sh $0 install -id=server123 -secret=abc123 -url=https://worker.example.com -interface=eth0,wan"
     echo "  sh $0 install -id=server123 -secret=abc123 -url=https://worker.example.com -reset_day=15"
     echo "  sh $0 install -id=server123 -secret=abc123 -url=https://worker.example.com -rx_correction=10 -tx_correction=5"
     exit 1
@@ -92,6 +94,47 @@ normalize_binary_value() {
         0|1) printf '%s' "$_cf_binary_value" ;;
         *) return 1 ;;
     esac
+}
+
+normalize_interface_list() {
+    printf '%s' "${1:-}" | awk -F',' '
+        BEGIN { out=""; bad=0; total=0 }
+        {
+            for (i=1; i<=NF; i++) {
+                name=$i
+                gsub(/^[ \t\r\n]+|[ \t\r\n]+$/, "", name)
+                if (name == "") continue
+                if (length(name) > 64 || name !~ /^[A-Za-z0-9_.:-]+$/) { bad=1; next }
+                if (!seen[name]++) {
+                    out = (out == "" ? name : out "," name)
+                    total += length(name)
+                }
+            }
+        }
+        END {
+            if (bad || length(out) > 255 || total > 255) exit 1
+            printf "%s", out
+        }'
+}
+
+get_configured_net_bytes() {
+    interfaces=$(normalize_interface_list "${1:-}") || interfaces=""
+    awk -v interfaces="$interfaces" '
+        BEGIN {
+            split(interfaces, parts, ",")
+            for (i in parts) if (parts[i] != "") wanted[parts[i]] = 1
+        }
+        NR > 2 {
+            iface=$1
+            sub(/:$/, "", iface)
+            if (interfaces != "") {
+                if (wanted[iface]) { rx += $2; tx += $10 }
+            } else if ($1 ~ /^(eth|en|wl)[a-z0-9]*:/) {
+                rx += $2; tx += $10
+            }
+        }
+        END { printf "%.0f %.0f\n", rx+0, tx+0 }
+    ' /proc/net/dev 2>/dev/null || echo "0 0"
 }
 
 to_uint() {
@@ -288,6 +331,27 @@ CONFIG_FILE="${CONFIG_DIR}/config.conf"
 TRAFFIC_DATA_FILE="${CONFIG_DIR}/traffic.dat"
 MAX_TRAFFIC_CORRECTION_GB=1000000
 
+normalize_interface_list() {
+    printf '%s' "${1:-}" | awk -F',' '
+        BEGIN { out=""; bad=0; total=0 }
+        {
+            for (i=1; i<=NF; i++) {
+                name=$i
+                gsub(/^[ \t\r\n]+|[ \t\r\n]+$/, "", name)
+                if (name == "") continue
+                if (length(name) > 64 || name !~ /^[A-Za-z0-9_.:-]+$/) { bad=1; next }
+                if (!seen[name]++) {
+                    out = (out == "" ? name : out "," name)
+                    total += length(name)
+                }
+            }
+        }
+        END {
+            if (bad || length(out) > 255 || total > 255) exit 1
+            printf "%s", out
+        }'
+}
+
 if [ ! -f "${CONFIG_FILE}" ]; then
     echo "[ERROR] 配置文件不存在: ${CONFIG_FILE}"
     exit 1
@@ -302,6 +366,7 @@ CT_NODE=""
 CU_NODE=""
 CM_NODE=""
 BD_NODE=""
+INTERFACE=""
 RESET_DAY=""
 AUTO_UPDATE=""
 CONFIG_MD5=""
@@ -317,11 +382,14 @@ while IFS='=' read -r key value; do
         CU_NODE) CU_NODE="${value%\"}"; CU_NODE="${CU_NODE#\"}" ;;
         CM_NODE) CM_NODE="${value%\"}"; CM_NODE="${CM_NODE#\"}" ;;
         BD_NODE) BD_NODE="${value%\"}"; BD_NODE="${BD_NODE#\"}" ;;
+        INTERFACE) INTERFACE="${value%\"}"; INTERFACE="${INTERFACE#\"}" ;;
         RESET_DAY) RESET_DAY="${value%\"}"; RESET_DAY="${RESET_DAY#\"}" ;;
         AUTO_UPDATE) AUTO_UPDATE="${value%\"}"; AUTO_UPDATE="${AUTO_UPDATE#\"}" ;;
         CONFIG_MD5) CONFIG_MD5="${value%\"}"; CONFIG_MD5="${CONFIG_MD5#\"}" ;;
     esac
 done < "${CONFIG_FILE}"
+
+INTERFACE=$(normalize_interface_list "${INTERFACE:-}") || INTERFACE=""
 
 to_uint() {
     local num=$(printf '%s' "${1:-0}" | sed 's/^0*//')
@@ -459,8 +527,8 @@ rotate_log_if_needed() {
 
 persist_dynamic_config() {
     local tmp_file="${CONFIG_FILE}.tmp.$$"
-    awk -v collect="$1" -v report="$2" -v reset="$3" -v md5="$4" -v ct="$5" -v cu="$6" -v cm="$7" -v bd="$8" '
-        BEGIN { c=0; r=0; d=0; m=0; tct=0; tcu=0; tcm=0; tbd=0 }
+    awk -v collect="$1" -v report="$2" -v reset="$3" -v md5="$4" -v ct="$5" -v cu="$6" -v cm="$7" -v bd="$8" -v iface="$9" '
+        BEGIN { c=0; r=0; d=0; m=0; tct=0; tcu=0; tcm=0; tbd=0; ni=0 }
         /^COLLECT_INTERVAL=/ { print "COLLECT_INTERVAL=\"" collect "\""; c=1; next }
         /^REPORT_INTERVAL=/ { print "REPORT_INTERVAL=\"" report "\""; r=1; next }
         /^RESET_DAY=/ { print "RESET_DAY=\"" reset "\""; d=1; next }
@@ -469,6 +537,7 @@ persist_dynamic_config() {
         /^CU_NODE=/ { print "CU_NODE=\"" cu "\""; tcu=1; next }
         /^CM_NODE=/ { print "CM_NODE=\"" cm "\""; tcm=1; next }
         /^BD_NODE=/ { print "BD_NODE=\"" bd "\""; tbd=1; next }
+        /^INTERFACE=/ { print "INTERFACE=\"" iface "\""; ni=1; next }
         { print }
         END {
             if (!c) print "COLLECT_INTERVAL=\"" collect "\""
@@ -479,6 +548,7 @@ persist_dynamic_config() {
             if (!tcu) print "CU_NODE=\"" cu "\""
             if (!tcm) print "CM_NODE=\"" cm "\""
             if (!tbd) print "BD_NODE=\"" bd "\""
+            if (!ni) print "INTERFACE=\"" iface "\""
         }
     ' "$CONFIG_FILE" > "$tmp_file" || { rm -f "$tmp_file"; return 1; }
     chmod 600 "$tmp_file" 2>/dev/null || true
@@ -497,7 +567,7 @@ apply_remote_config() {
     log_debug "Remote config raw: bytes=${bytes} body=${body}"
     case "$body" in
         '') log_warn_debug "Remote config rejected: empty body"; return 1 ;;
-        *[!a-z0-9_=\&.\-:]*) log_warn_debug "Remote config rejected: invalid characters body=${body}"; return 1 ;;
+        *[!A-Za-z0-9_=\&.,:-]*) log_warn_debug "Remote config rejected: invalid characters body=${body}"; return 1 ;;
     esac
 
     local collect=""
@@ -508,6 +578,7 @@ apply_remote_config() {
     local cu=""
     local cm=""
     local bd=""
+    local interface=""
     local rx_corr=""
     local tx_corr=""
     local update=""
@@ -524,6 +595,7 @@ apply_remote_config() {
             custom_cu)        cu="$_v" ;;
             custom_cm)        cm="$_v" ;;
             custom_bd)        bd="$_v" ;;
+            interface)        interface="$_v" ;;
             rx_correction)    rx_corr="$_v" ;;
             tx_correction)    tx_corr="$_v" ;;
             update)           update="$_v" ;;
@@ -534,10 +606,10 @@ apply_remote_config() {
     IFS="$saved_ifs"
 
     local has_config=0
-    if [ -n "$collect" ] || [ -n "$report" ] || [ -n "$reset" ] || [ -n "$schema" ]; then
+    if [ -n "$collect" ] || [ -n "$report" ] || [ -n "$reset" ] || [ -n "$schema" ] || [ -n "$interface" ]; then
         has_config=1
     fi
-    log_debug "Remote config parsed: has_config=${has_config} update=${update:-} collect=${collect:-} report=${report:-} reset=${reset:-} schema=${schema:-} rx_corr=${rx_corr:-} tx_corr=${tx_corr:-}"
+    log_debug "Remote config parsed: has_config=${has_config} update=${update:-} collect=${collect:-} report=${report:-} reset=${reset:-} schema=${schema:-} interface=${interface:-} rx_corr=${rx_corr:-} tx_corr=${tx_corr:-}"
 
     if [ "$has_config" = "0" ]; then
         if [ "$update" = "1" ]; then
@@ -561,17 +633,18 @@ apply_remote_config() {
     case "$report" in 30|60|120|180) ;; *) log_warn_debug "Remote config rejected: invalid report_interval=${report:-}"; return 1 ;; esac
     case "$reset" in 0|[1-9]|1[0-9]|2[0-9]|30|31) ;; *) log_warn_debug "Remote config rejected: invalid reset_day=${reset:-}"; return 1 ;; esac
     case "$update" in ''|0|1) ;; *) log_warn_debug "Remote config rejected: invalid update=${update}"; return 1 ;; esac
-    if [ "$schema" != "2" ]; then
+    if [ "$schema" != "3" ]; then
         log_warn_debug "Remote config rejected: invalid schema_version=${schema:-}"
         return 1
     fi
+    interface=$(normalize_interface_list "${interface:-}") || { log_warn_debug "Remote config rejected: invalid interface=${interface:-}"; return 1; }
     if [ "$report" -lt "$collect" ]; then
         log_warn_debug "Remote config rejected: report_interval=${report} less than collect_interval=${collect}"
         return 1
     fi
 
     if [ "$md5" != "${CONFIG_MD5:-none}" ]; then
-        persist_dynamic_config "$collect" "$report" "$reset" "$md5" "$ct" "$cu" "$cm" "$bd" || return 1
+        persist_dynamic_config "$collect" "$report" "$reset" "$md5" "$ct" "$cu" "$cm" "$bd" "$interface" || return 1
         COLLECT_INTERVAL="$collect"
         REPORT_INTERVAL="$report"
         RESET_DAY="$reset"
@@ -579,10 +652,15 @@ apply_remote_config() {
         CU_NODE="$cu"
         CM_NODE="$cm"
         BD_NODE="$bd"
+        INTERFACE="$interface"
         CONFIG_MD5="$md5"
         ACTIVE_INTERVAL="$REPORT_INTERVAL"
         [ "$COLLECT_INTERVAL" -gt 0 ] && ACTIVE_INTERVAL="$COLLECT_INTERVAL"
-        log_info "Dynamic configuration applied: md5=${CONFIG_MD5} ct=${CT_NODE:-} cu=${CU_NODE:-} cm=${CM_NODE:-} bd=${BD_NODE:-}"
+        NET_STAT=$(get_net_bytes)
+        RX_PREV=$(echo "$NET_STAT" | awk '{print $1}'); RX_PREV=${RX_PREV:-0}
+        TX_PREV=$(echo "$NET_STAT" | awk '{print $2}'); TX_PREV=${TX_PREV:-0}
+        PREV_LOOP_TIME=$(date +%s)
+        log_info "Dynamic configuration applied: md5=${CONFIG_MD5} interface=${INTERFACE:-auto} ct=${CT_NODE:-} cu=${CU_NODE:-} cm=${CM_NODE:-} bd=${BD_NODE:-}"
 
         if kill -0 "$WORKER_PID" 2>/dev/null; then
             pkill -P "$WORKER_PID" 2>/dev/null || true
@@ -665,6 +743,10 @@ apply_traffic_correction() {
     fi
     local now_ts
     now_ts=$(date +%s)
+    local current_net
+    current_net=$(get_net_bytes)
+    saved_rx_prev=$(echo "$current_net" | awk '{print $1}'); saved_rx_prev=${saved_rx_prev:-0}
+    saved_tx_prev=$(echo "$current_net" | awk '{print $2}'); saved_tx_prev=${saved_tx_prev:-0}
     saved_rx_period=${rx_bytes}
     saved_tx_period=${tx_bytes}
     log_info "Traffic correction applied: RX=${rx_val}GB (${rx_bytes} bytes) TX=${tx_val}GB (${tx_bytes} bytes)"
@@ -676,6 +758,7 @@ RX_PERIOD=${saved_rx_period}
 TX_PERIOD=${saved_tx_period}
 LAST_CHECK=${now_ts}
 PERIOD_START=${saved_period_start}
+INTERFACE=${INTERFACE:-}
 EOF
     mv "${TRAFFIC_DATA_FILE}.tmp" "${TRAFFIC_DATA_FILE}" 2>/dev/null || true
 }
@@ -702,7 +785,23 @@ safe_div() {
 }
 
 get_net_bytes() {
-    awk 'NR>2 && $1~/^(eth|en|wl)[a-z0-9]*:/{rx+=$2;tx+=$10}END{printf "%.0f %.0f\n",rx,tx}' /proc/net/dev 2>/dev/null || echo "0 0";
+    local interfaces="${INTERFACE:-}"
+    awk -v interfaces="$interfaces" '
+        BEGIN {
+            split(interfaces, parts, ",")
+            for (i in parts) if (parts[i] != "") wanted[parts[i]] = 1
+        }
+        NR > 2 {
+            iface=$1
+            sub(/:$/, "", iface)
+            if (interfaces != "") {
+                if (wanted[iface]) { rx += $2; tx += $10 }
+            } else if ($1 ~ /^(eth|en|wl)[a-z0-9]*:/) {
+                rx += $2; tx += $10
+            }
+        }
+        END { printf "%.0f %.0f\n", rx+0, tx+0 }
+    ' /proc/net/dev 2>/dev/null || echo "0 0"
 }
 
 is_leap_year() {
@@ -789,10 +888,10 @@ calc_monthly_traffic() {
     mkdir -p "${CONFIG_DIR}" 2>/dev/null || true
 
     local saved_rx_prev=0 saved_tx_prev=0 saved_rx_period=0 saved_tx_period=0
-    local saved_last_check=0 saved_period_start=0
+    local saved_last_check=0 saved_period_start=0 saved_interface=""
     if [ -f "${TRAFFIC_DATA_FILE}" ]; then
         local tmp_rx_prev='' tmp_tx_prev='' tmp_rx_period='' tmp_tx_period=''
-        local tmp_last_check='' tmp_period_start=''
+        local tmp_last_check='' tmp_period_start='' tmp_interface=''
         while IFS='=' read -r key value; do
             case "$key" in
                 RX_PREV) tmp_rx_prev="$value" ;;
@@ -801,11 +900,19 @@ calc_monthly_traffic() {
                 TX_PERIOD) tmp_tx_period="$value" ;;
                 LAST_CHECK) tmp_last_check="$value" ;;
                 PERIOD_START) tmp_period_start="$value" ;;
+                INTERFACE) tmp_interface="$value" ;;
             esac
         done < "${TRAFFIC_DATA_FILE}"
         saved_rx_prev=${tmp_rx_prev:-0}; saved_tx_prev=${tmp_tx_prev:-0}
         saved_rx_period=${tmp_rx_period:-0}; saved_tx_period=${tmp_tx_period:-0}
         saved_last_check=${tmp_last_check:-0}; saved_period_start=${tmp_period_start:-0}
+        saved_interface=${tmp_interface:-}
+    fi
+
+    if [ "${saved_interface}" != "${INTERFACE:-}" ]; then
+        saved_rx_prev=0; saved_tx_prev=0
+        saved_rx_period=0; saved_tx_period=0
+        saved_last_check=0; saved_period_start=0
     fi
 
     local period_start_ts
@@ -838,6 +945,7 @@ RX_PERIOD=${saved_rx_period}
 TX_PERIOD=${saved_tx_period}
 LAST_CHECK=${now_ts}
 PERIOD_START=${period_start_ts}
+INTERFACE=${INTERFACE:-}
 EOF
     mv "${TRAFFIC_DATA_FILE}.tmp" "${TRAFFIC_DATA_FILE}" 2>/dev/null || true
 
@@ -1236,7 +1344,7 @@ EOF
         REPORT_HEADER_FILE="/tmp/.cf_probe_headers.$$"
         REPORT_HTTP_CODE=$(curl -sS -D "$REPORT_HEADER_FILE" -o "$REPORT_RESPONSE_FILE" -w "%{http_code}" -X POST \
             -H "Content-Type: application/json" \
-            -H "X-Agent-Config-Schema: 2" \
+            -H "X-Agent-Config-Schema: 3" \
             -H "X-Agent-Version: ${AGENT_VERSION}" \
             -H "X-Agent-Config-Md5: ${CONFIG_MD5:-none}" \
             -d "$PAYLOAD" -m 8 --connect-timeout 3 "$WORKER_URL" 2>/dev/null || echo 000)
@@ -1434,6 +1542,7 @@ install_probe() {
     CU_NODE=""
     CM_NODE=""
     BD_NODE=""
+    INTERFACE=""
     RESET_DAY=""
     AUTO_UPDATE=""
     RX_CORRECTION=""
@@ -1450,6 +1559,7 @@ install_probe() {
             -cu=*) CU_NODE="${arg#-cu=}" ;;
             -cm=*) CM_NODE="${arg#-cm=}" ;;
             -bd=*) BD_NODE="${arg#-bd=}" ;;
+            -interface=*|-interfaces=*|-iface=*) INTERFACE="${arg#*=}" ;;
             -reset_day=*) RESET_DAY="${arg#-reset_day=}" ;;
             -auto_update=*|-auto-update=*) AUTO_UPDATE=$(normalize_binary_value "${arg#*=}") || error "auto_update 参数非法，仅支持 0 或 1" ;;
             -rx_correction=*) RX_CORRECTION="${arg#-rx_correction=}" ;;
@@ -1475,6 +1585,7 @@ install_probe() {
             AUTO_UPDATE=$(normalize_binary_value "$AUTO_UPDATE" 0) || error "auto_update 参数非法，仅支持 0 或 1"
             
             step "更新配置文件..."
+            INTERFACE=$(normalize_interface_list "${INTERFACE:-}") || error "interface parameter is invalid; use comma-separated interface names"
             cat > "${CONFIG_FILE}" << EOF
 SERVER_ID="${SERVER_ID}"
 SECRET="${SECRET}"
@@ -1485,6 +1596,7 @@ CT_NODE="${CT_NODE:-}"
 CU_NODE="${CU_NODE:-}"
 CM_NODE="${CM_NODE:-}"
 BD_NODE="${BD_NODE:-}"
+INTERFACE="${INTERFACE:-}"
 RESET_DAY="${RESET_DAY}"
 AUTO_UPDATE="${AUTO_UPDATE}"
 CONFIG_MD5="none"
@@ -1504,6 +1616,7 @@ EOF
                     CU_NODE) CU_NODE="${value%\"}"; CU_NODE="${CU_NODE#\"}" ;;
                     CM_NODE) CM_NODE="${value%\"}"; CM_NODE="${CM_NODE#\"}" ;;
                     BD_NODE) BD_NODE="${value%\"}"; BD_NODE="${BD_NODE#\"}" ;;
+                    INTERFACE) INTERFACE="${value%\"}"; INTERFACE="${INTERFACE#\"}" ;;
                     RESET_DAY) RESET_DAY="${value%\"}"; RESET_DAY="${RESET_DAY#\"}" ;;
                     AUTO_UPDATE) AUTO_UPDATE="${value%\"}"; AUTO_UPDATE="${AUTO_UPDATE#\"}" ;;
                 esac
@@ -1534,6 +1647,7 @@ EOF
         fi
 
         step "生成配置文件..."
+        INTERFACE=$(normalize_interface_list "${INTERFACE:-}") || error "interface parameter is invalid; use comma-separated interface names"
         cat > "${CONFIG_FILE}" << EOF
 SERVER_ID="${SERVER_ID}"
 SECRET="${SECRET}"
@@ -1544,6 +1658,7 @@ CT_NODE="${CT_NODE:-}"
 CU_NODE="${CU_NODE:-}"
 CM_NODE="${CM_NODE:-}"
 BD_NODE="${BD_NODE:-}"
+INTERFACE="${INTERFACE:-}"
 RESET_DAY="${RESET_DAY}"
 AUTO_UPDATE="${AUTO_UPDATE}"
 CONFIG_MD5="none"
@@ -1557,6 +1672,8 @@ EOF
     normalize_probe_config
     AUTO_UPDATE=$(normalize_binary_value "$AUTO_UPDATE" 0) || error "auto_update 参数非法，仅支持 0 或 1"
 
+    INTERFACE=$(normalize_interface_list "${INTERFACE:-}") || error "interface parameter is invalid; use comma-separated interface names"
+
     if [ -n "${RX_CORRECTION}" ] || [ -n "${TX_CORRECTION}" ]; then
         step "应用流量校正..."
         rm -f "${OLD_TRAFFIC_DATA_FILE}" 2>/dev/null || true
@@ -1564,8 +1681,9 @@ EOF
         mkdir -p "${CONFIG_DIR}" 2>/dev/null || true
         now_ts=$(date '+%s')
         rx_correction_bytes=0; tx_correction_bytes=0
-        current_rx=$(awk 'NR>2 && $1~/^(eth|en|wl)[a-z0-9]*:/{rx+=$2}END{printf "%.0f", rx}' /proc/net/dev 2>/dev/null || echo 0)
-        current_tx=$(awk 'NR>2 && $1~/^(eth|en|wl)[a-z0-9]*:/{tx+=$10}END{printf "%.0f", tx}' /proc/net/dev 2>/dev/null || echo 0)
+        current_net=$(get_configured_net_bytes "${INTERFACE:-}")
+        current_rx=$(echo "${current_net}" | awk '{print $1}'); current_rx=${current_rx:-0}
+        current_tx=$(echo "${current_net}" | awk '{print $2}'); current_tx=${current_tx:-0}
         [ -n "${RX_CORRECTION}" ] && rx_correction_bytes=$(echo "${RX_CORRECTION}" | awk '{printf "%.0f", $1 * 1024 * 1024 * 1024}')
         [ -n "${TX_CORRECTION}" ] && tx_correction_bytes=$(echo "${TX_CORRECTION}" | awk '{printf "%.0f", $1 * 1024 * 1024 * 1024}')
         [ -n "${RX_CORRECTION}" ] && info "下行流量校正: ${RX_CORRECTION}GB"
@@ -1578,6 +1696,7 @@ RX_PERIOD=${rx_correction_bytes}
 TX_PERIOD=${tx_correction_bytes}
 LAST_CHECK=${now_ts}
 PERIOD_START=0
+INTERFACE=${INTERFACE:-}
 EOF
     fi
 
@@ -1598,6 +1717,7 @@ EOF
     printf  '    ● 自动更新    : %s\n' "${AUTO_UPDATE}"
     [ -n "${RX_CORRECTION}" ] && printf  '    ● 下行校正    : %sGB\n' "${RX_CORRECTION}"
     [ -n "${TX_CORRECTION}" ] && printf  '    ● 上行校正    : %sGB\n' "${TX_CORRECTION}"
+    printf  '    Interface   : %s\n' "${INTERFACE:-auto}"
     if [ "${RESET_DAY}" = "0" ]; then
         printf  '    ● 流量重置日  : 不重置\n'
     else

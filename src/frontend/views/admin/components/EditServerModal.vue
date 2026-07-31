@@ -119,6 +119,10 @@
             <option :value="180">180</option>
           </select>
         </div>
+        <div class="form-group flex-1">
+          <label class="form-label">{{ trans.networkInterface }}</label>
+          <input type="text" name="edit_interface" autocomplete="off" v-model.trim="editForm.interface" class="form-input" :placeholder="trans.networkInterfacePlaceholder">
+        </div>
       </div>
 
       <div class="text-muted text-sm mb-3">

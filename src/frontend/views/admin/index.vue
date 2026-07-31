@@ -226,6 +226,7 @@
         :custom-cu="customCu"
         :custom-cm="customCm"
         :custom-bd="customBd"
+        :network-interface="networkInterface"
         :reset-day="resetDay"
         :rx-correction="rxCorrection"
         :tx-correction="txCorrection"
@@ -736,6 +737,7 @@ const editForm = ref({
   expire_date: '',
   traffic_limit: '',
   traffic_calc_type: 'total',
+  interface: '',
   reset_day: 1,
   collect_interval: 0,
   report_interval: 60,
@@ -788,6 +790,7 @@ const customCt = ref('')
 const customCu = ref('')
 const customCm = ref('')
 const customBd = ref('')
+const networkInterface = ref('')
 const resetDay = ref(1)
 const rxCorrection = ref('')
 const txCorrection = ref('')
@@ -1261,6 +1264,7 @@ const copyCmd = (serverId) => {
   customCu.value = server?.custom_cu || settings.value.custom_cu
   customCm.value = server?.custom_cm || settings.value.custom_cm
   customBd.value = server?.custom_bd || settings.value.custom_bd
+  networkInterface.value = server?.interface || ''
   resetDay.value = server?.reset_day ?? 1
   rxCorrection.value = server?.rx_correction ?? ''
   txCorrection.value = server?.tx_correction ?? ''
@@ -1289,6 +1293,7 @@ const getCustomInstallCommand = () => {
     if (customCu.value) params.push(`-CuNode '${customCu.value}'`)
     if (customCm.value) params.push(`-CmNode '${customCm.value}'`)
     if (customBd.value) params.push(`-BdNode '${customBd.value}'`)
+    if (networkInterface.value) params.push(`-Interface '${networkInterface.value}'`)
     if (hasCorrectionValue(rxCorrection.value)) params.push(`-RxCorrection ${rxCorrection.value}`)
     if (hasCorrectionValue(txCorrection.value)) params.push(`-TxCorrection ${txCorrection.value}`)
     return `irm ${HOST}/cf-server-monitor.ps1 -OutFile cf-server-monitor.ps1; powershell -ExecutionPolicy Bypass -File .\\cf-server-monitor.ps1 ${params.join(' ')}`
@@ -1305,6 +1310,7 @@ const getCustomInstallCommand = () => {
   if (customCu.value) cmd += ` -cu=${customCu.value}`
   if (customCm.value) cmd += ` -cm=${customCm.value}`
   if (customBd.value) cmd += ` -bd=${customBd.value}`
+  if (networkInterface.value) cmd += ` -interface=${networkInterface.value}`
   if (hasCorrectionValue(rxCorrection.value)) cmd += ` -rx_correction=${rxCorrection.value}`
   if (hasCorrectionValue(txCorrection.value)) cmd += ` -tx_correction=${txCorrection.value}`
   return cmd
@@ -1365,6 +1371,7 @@ const openEditModal = (server) => {
     expire_date: server.expire_date || '',
     traffic_limit: server.traffic_limit || '',
     traffic_calc_type: server.traffic_calc_type || 'total',
+    interface: server.interface || '',
     reset_day: server.reset_day ?? 1,
     collect_interval: server.collect_interval ?? 0,
     report_interval: server.report_interval || 60,
@@ -1449,6 +1456,7 @@ const saveEdit = async () => {
     expire_date: normalizedExpireDate,
     traffic_limit: editForm.value.traffic_limit,
     traffic_calc_type: editForm.value.traffic_calc_type,
+    interface: editForm.value.interface,
     reset_day: editForm.value.reset_day,
     collect_interval: editForm.value.collect_interval,
     report_interval: editForm.value.report_interval,
