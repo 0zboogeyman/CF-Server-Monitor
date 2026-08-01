@@ -733,10 +733,24 @@ get_period_start_ts() {
     local year month day
     # 用 awk 将 epoch 秒转换为 year month day（UTC），避免 BusyBox date -d 不可用
     local _date_parts
-    _date_parts=$(awk 'BEGIN{
-        t='"${now_ts}"'; d=int(t/86400)+719468; y=int((d-122.1)/365.25);
-        m=int((d-365.25*y+122.1)/30.6001); day=d-int(30.6001*(m+(m>2?1:0)-3)+1.5);
-        if(m<14) m=m-1; else { m=m-13; if(m>2) y=y+1 }
+    _date_parts=$(awk -v ts="$now_ts" '
+    BEGIN {
+        secs = int(ts); y = 1970
+        while (1) {
+            leap = (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
+            days_year = leap ? 366 : 365
+            if (secs < days_year * 86400) break
+            secs -= days_year * 86400; y++
+        }
+        mdays[1]=31; mdays[2]=leap?29:28; mdays[3]=31; mdays[4]=30
+        mdays[5]=31; mdays[6]=30; mdays[7]=31; mdays[8]=31
+        mdays[9]=30; mdays[10]=31; mdays[11]=30; mdays[12]=31
+        m = 1
+        while (m <= 12) {
+            if (secs < mdays[m] * 86400) break
+            secs -= mdays[m] * 86400; m++
+        }
+        day = int(secs / 86400) + 1
         printf "%04d %02d %02d\n", y, m, day
     }')
     year=$(echo "$_date_parts" | awk '{print $1}')
