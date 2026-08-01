@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.3.7"
+AGENT_VERSION="1.3.8"
 
 # 颜色定义
 RED='\033[0;31m'
@@ -27,6 +27,7 @@ CONFIG_FILE="${CONFIG_DIR}/config.conf"
 TRAFFIC_DATA_FILE="${CONFIG_DIR}/traffic.dat"
 OLD_TRAFFIC_DATA_FILE="/var/lib/cf-probe/traffic.dat"
 MAX_TRAFFIC_CORRECTION_GB=1000000
+AUTO_UPDATE_DELAY_SECONDS=60
 CONTAINER_PID_FILE="/var/run/cf-probe.pid"
 CONTAINER_LOG_FILE="/var/log/cf-probe.log"
 DEBUG_ENV_FILE="/var/run/cf-probe-debug.env"
@@ -393,11 +394,11 @@ schedule_agent_update() {
         return 1
     fi
     log_debug "Auto update requested: install_url=${install_url}"
+    printf '%s\n' "$now" > "$lock_file" 2>/dev/null || true
 
     log_debug "Auto update scheduling via nohup: install_url=${install_url}"
-    nohup /bin/bash -c 'set -o pipefail; curl -fsSL --connect-timeout 5 -m 30 "$1" | bash -s install' _ "$install_url" >/dev/null 2>&1 &
-    printf '%s\n' "$now" > "$lock_file" 2>/dev/null || true
-    log_info "Auto update scheduled"
+    nohup /bin/bash -c 'sleep "$2"; set -o pipefail; curl -fsSL --connect-timeout 5 -m 30 "$1" | bash -s install' _ "$install_url" "$AUTO_UPDATE_DELAY_SECONDS" >/dev/null 2>&1 &
+    log_info "Auto update scheduled after ${AUTO_UPDATE_DELAY_SECONDS}s"
     return 0
 }
 
@@ -700,6 +701,13 @@ is_leap_year() {
     [ $((year % 4)) -eq 0 ] && [ $((year % 100)) -ne 0 ] || [ $((year % 400)) -eq 0 ]
 }
 
+to_decimal() {
+    local value="${1:-0}"
+    value=$(printf '%s' "$value" | sed 's/^0*//')
+    case "$value" in ''|*[!0-9]*) value=0 ;; esac
+    printf '%s' "$value"
+}
+
 # 纯算术计算：给定年月日（UTC）返回 epoch 秒数，不依赖 date -d
 _days_in_month() {
     local y=$1 m=$2
@@ -757,17 +765,20 @@ get_period_start_ts() {
     local now_ts="$2"
     local year month day
     read -r year month day < <(_get_utc_ymd "$now_ts")
+    month=$(to_decimal "$month")
+    day=$(to_decimal "$day")
 
-    local target_day="$reset_day"
+    local target_day
+    target_day=$(to_decimal "$reset_day")
     case "$month" in
-        02)
+        2)
             if is_leap_year "$year"; then
                 [ "$target_day" -gt 29 ] && target_day=29
             else
                 [ "$target_day" -gt 28 ] && target_day=28
             fi
             ;;
-        04|06|09|11) [ "$target_day" -gt 30 ] && target_day=30 ;;
+        4|6|9|11) [ "$target_day" -gt 30 ] && target_day=30 ;;
     esac
 
     local period_start_ts
@@ -777,14 +788,14 @@ get_period_start_ts() {
         local prev_month=$((month - 1))
         [ "$prev_month" -eq 0 ] && { prev_month=12; year=$((year - 1)); }
         case "$prev_month" in
-            02)
+            2)
                 if is_leap_year "$year"; then
                     [ "$target_day" -gt 29 ] && target_day=29
                 else
                     [ "$target_day" -gt 28 ] && target_day=28
                 fi
                 ;;
-            04|06|09|11) [ "$target_day" -gt 30 ] && target_day=30 ;;
+            4|6|9|11) [ "$target_day" -gt 30 ] && target_day=30 ;;
         esac
         period_start_ts=$(_epoch_from_ymd "$year" "$prev_month" "$target_day")
     fi
@@ -828,6 +839,7 @@ calc_monthly_traffic() {
 
     local period_start_ts
     period_start_ts=$(get_period_start_ts "$reset_day" "$now_ts")
+    case "$period_start_ts" in ''|*[!0-9]*) period_start_ts=0 ;; esac
 
     local rx_delta=0 tx_delta=0
     if [ "$saved_last_check" -ne 0 ]; then

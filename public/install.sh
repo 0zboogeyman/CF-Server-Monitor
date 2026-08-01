@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.3.7"
+AGENT_VERSION="1.3.8"
 
 # 颜色定义
 RED='\033[0;31m'
@@ -26,6 +26,7 @@ CONFIG_FILE="${CONFIG_DIR}/config.conf"
 TRAFFIC_DATA_FILE="${CONFIG_DIR}/traffic.dat"
 OLD_TRAFFIC_DATA_FILE="/var/lib/cf-probe/traffic.dat"
 MAX_TRAFFIC_CORRECTION_GB=1000000
+AUTO_UPDATE_DELAY_SECONDS=60
 CONTAINER_PID_FILE="/run/cf-probe.pid"
 CONTAINER_LOG_FILE="/var/log/cf-probe.log"
 DEBUG_ENV_FILE="/run/cf-probe-debug.env"
@@ -412,11 +413,11 @@ schedule_agent_update() {
     log_debug "Auto update requested: install_url=${install_url}"
 
     if [ -d /run/systemd/system ] && command -v systemd-run >/dev/null 2>&1; then
-        systemd_output=$(systemd-run --unit="${SERVICE_NAME}-auto-update-${now}" /bin/bash -c 'set -o pipefail; curl -fsSL --connect-timeout 5 -m 30 "$1" | bash -s install' _ "$install_url" 2>&1)
+        systemd_output=$(systemd-run --unit="${SERVICE_NAME}-auto-update-${now}" /bin/bash -c 'sleep "$2"; set -o pipefail; curl -fsSL --connect-timeout 5 -m 30 "$1" | bash -s install' _ "$install_url" "$AUTO_UPDATE_DELAY_SECONDS" 2>&1)
         systemd_status=$?
         if [ "$systemd_status" -eq 0 ]; then
             printf '%s\n' "$now" > "$lock_file" 2>/dev/null || true
-            log_info "Auto update scheduled via systemd-run: unit=${SERVICE_NAME}-auto-update-${now}"
+            log_info "Auto update scheduled via systemd-run after ${AUTO_UPDATE_DELAY_SECONDS}s: unit=${SERVICE_NAME}-auto-update-${now}"
             log_debug "systemd-run output: ${systemd_output}"
             return 0
         fi
@@ -429,9 +430,9 @@ schedule_agent_update() {
     fi
 
     log_debug "Auto update scheduling via nohup: install_url=${install_url}"
-    nohup /bin/bash -c 'set -o pipefail; curl -fsSL --connect-timeout 5 -m 30 "$1" | bash -s install' _ "$install_url" >/dev/null 2>&1 &
+    nohup /bin/bash -c 'sleep "$2"; set -o pipefail; curl -fsSL --connect-timeout 5 -m 30 "$1" | bash -s install' _ "$install_url" "$AUTO_UPDATE_DELAY_SECONDS" >/dev/null 2>&1 &
     printf '%s\n' "$now" > "$lock_file" 2>/dev/null || true
-    log_info "Auto update scheduled"
+    log_info "Auto update scheduled after ${AUTO_UPDATE_DELAY_SECONDS}s"
     return 0
 }
 
@@ -731,6 +732,13 @@ is_leap_year() {
     [ $((year % 4)) -eq 0 ] && [ $((year % 100)) -ne 0 ] || [ $((year % 400)) -eq 0 ]
 }
 
+to_decimal() {
+    local value="${1:-0}"
+    value=$(printf '%s' "$value" | sed 's/^0*//')
+    case "$value" in ''|*[!0-9]*) value=0 ;; esac
+    printf '%s' "$value"
+}
+
 # 获取当月账单周期起始时间戳（UTC+0）
 get_period_start_ts() {
     local reset_day="$1"
@@ -740,35 +748,39 @@ get_period_start_ts() {
     year=$(date -u -d "@${now_ts}" '+%Y' 2>/dev/null || date -u -r "${now_ts}" '+%Y' 2>/dev/null)
     month=$(date -u -d "@${now_ts}" '+%m' 2>/dev/null || date -u -r "${now_ts}" '+%m' 2>/dev/null)
     day=$(date -u -d "@${now_ts}" '+%d' 2>/dev/null || date -u -r "${now_ts}" '+%d' 2>/dev/null)
+    month=$(to_decimal "$month")
+    day=$(to_decimal "$day")
     
-    local target_day="$reset_day"
+    local target_day month_str
+    target_day=$(to_decimal "$reset_day")
+    month_str=$(printf "%02d" "$month")
     case "$month" in
-        02) 
+        2) 
             if is_leap_year "$year"; then
                 [ "$target_day" -gt 29 ] && target_day=29
             else
                 [ "$target_day" -gt 28 ] && target_day=28
             fi
             ;;
-        04|06|09|11) [ "$target_day" -gt 30 ] && target_day=30 ;;
+        4|6|9|11) [ "$target_day" -gt 30 ] && target_day=30 ;;
     esac
     
     local period_start_ts
     if [ "$day" -ge "$target_day" ]; then
-        period_start_ts=$(date -u -d "${year}-${month}-${target_day} 00:00:00" '+%s' 2>/dev/null || date -u -r "${now_ts}" '+%s' 2>/dev/null)
+        period_start_ts=$(date -u -d "${year}-${month_str}-${target_day} 00:00:00" '+%s' 2>/dev/null || date -u -r "${now_ts}" '+%s' 2>/dev/null)
     else
         local prev_month=$((month - 1))
         [ "$prev_month" -eq 0 ] && { prev_month=12; year=$((year - 1)); }
         local prev_month_str=$(printf "%02d" "$prev_month")
         case "$prev_month" in
-            02) 
+            2) 
                 if is_leap_year "$year"; then
                     [ "$target_day" -gt 29 ] && target_day=29
                 else
                     [ "$target_day" -gt 28 ] && target_day=28
                 fi
                 ;;
-            04|06|09|11) [ "$target_day" -gt 30 ] && target_day=30 ;;
+            4|6|9|11) [ "$target_day" -gt 30 ] && target_day=30 ;;
         esac
         period_start_ts=$(date -u -d "${year}-${prev_month_str}-${target_day} 00:00:00" '+%s' 2>/dev/null || date -u -r "${now_ts}" '+%s' 2>/dev/null)
     fi
@@ -815,6 +827,7 @@ calc_monthly_traffic() {
     # 计算当前账单周期起始
     local period_start_ts
     period_start_ts=$(get_period_start_ts "$reset_day" "$now_ts")
+    case "$period_start_ts" in ''|*[!0-9]*) period_start_ts=0 ;; esac
     
     # 检测是否是首次运行（没有历史记录）
     local rx_delta=0 tx_delta=0
