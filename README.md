@@ -563,8 +563,11 @@ Workers 环境下 CSP 会放在 HTTP Response Header 中返回，并同时设置
 | 自定义 CSS 主题 | 修改页面样式 | 后台 → 外观 → 自定义脚本 |
 | 自定义 `<head>` | 添加外部 CSS/JS、Meta 标签等 | 后台 → 外观 → 自定义 `<head>` |
 | 背景图片 | 自定义页面背景 | 后台 → 外观 → 背景图片 |
+| Mikus 模式 | 勾选后自动写入 `theme_options.mikus`，开启内置 Mikus 前端配色、加载页、欢迎区与樱花动画 | 后台 → 外观 → 开启 Mikus 模式 |
 | CSP 白名单 | 允许加载的第三方资源域名 | 后台 → 外观 → CSP 设置 |
 | 主题商店 | 选择第三方主题与版本 | 后台 → 主题商店 |
+
+Mikus 模式不会改动数据库结构，仍复用现有 `theme_options` JSON 配置；勾选开关时会写入 `{"mikus":1}`，取消勾选时会移除 `mikus` 参数。视觉来源：[mikus-loli/komari-mikus](https://github.com/mikus-loli/komari-mikus)。
 
 **主题商店与 Workers 反代说明**：
 
