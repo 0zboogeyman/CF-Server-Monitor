@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.3.6"
+AGENT_VERSION="1.3.7"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

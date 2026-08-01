@@ -9,7 +9,7 @@
 
 set -eu
 
-AGENT_VERSION="1.3.6"
+AGENT_VERSION="1.3.7"
 
 # 路径定义（配置文件系统）
 CONFIG_DIR="/etc/config/cf-probe"

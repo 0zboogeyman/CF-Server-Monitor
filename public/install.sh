@@ -7,7 +7,7 @@
 
 set -euo pipefail
 
-AGENT_VERSION="1.3.6"
+AGENT_VERSION="1.3.7"
 
 # 颜色定义
 RED='\033[0;31m'
