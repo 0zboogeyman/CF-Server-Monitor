@@ -82,7 +82,6 @@
         <div class="mikus-welcome-time">
           <span class="mikus-time-label">{{ mikusDateText }}</span>
           <span class="mikus-time-value">{{ mikusTimeText }}</span>
-          <span class="mikus-traffic-text">{{ mikusTrafficText }}</span>
         </div>
       </div>
     </section>
@@ -421,14 +420,6 @@ const mikusTimeText = computed(() => new Intl.DateTimeFormat(mikusLocale.value, 
   second: '2-digit',
   hour12: false
 }).format(new Date(now.value)))
-
-const mikusTrafficText = computed(() => {
-  const upload = formatBytes(stats.value.globalNetTx)
-  const download = formatBytes(stats.value.globalNetRx)
-  return currentLang.value === 'zh'
-    ? `总上传: ${upload} / 总下载: ${download}`
-    : `Total upload: ${upload} / total download: ${download}`
-})
 
 watch(isMikusTheme, (enabled) => {
   setMikusThemeClass(enabled)

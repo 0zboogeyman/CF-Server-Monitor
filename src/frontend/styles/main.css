@@ -3554,7 +3554,6 @@ body.mikus-theme .nav-area,
 body.mikus-theme .nav-bar,
 body.mikus-theme .main-panel,
 body.mikus-theme .global-stats,
-body.mikus-theme .view-panel,
 body.mikus-theme .server-card,
 body.mikus-theme .host-card,
 body.mikus-theme .chart-card,
@@ -3853,15 +3852,6 @@ body.light.mikus-theme .modal-overlay {
     font-family: var(--terminal-font);
     line-height: 1.2;
     text-shadow: 0 2px 10px rgba(232, 102, 138, 0.18);
-}
-
-.mikus-traffic-text {
-    max-width: min(100%, 420px);
-    color: var(--mikus-text-muted);
-    font-size: 11px;
-    font-weight: 500;
-    line-height: 1.4;
-    overflow-wrap: anywhere;
 }
 
 @keyframes mikus-logo-breath {
@@ -4321,10 +4311,6 @@ body.light.mikus-theme .modal-overlay {
 
     .mikus-time-value {
         font-size: 20px;
-    }
-
-    .mikus-traffic-text {
-        font-size: 10px;
     }
 
     .mikus-sakura-petal {
