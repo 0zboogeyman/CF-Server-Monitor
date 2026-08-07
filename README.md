@@ -898,7 +898,7 @@ Cloudflare D1 免费版提供 5GB 存储和 5M 读取行/日、100K 写入行/�
 **Q: Ping结果都是1?**
 
 1. 检查服务器是否开了代理，可以关闭后测试。
-2. openclash会导致延迟测试问题，推荐使用passwall（感谢@chenisme 美馨 提供的解决方案）
+2. 软路由使用openclash会导致延迟测试问题，推荐使用passwall（感谢@chenisme 美馨 提供的解决方案）
 
 </details>
 
