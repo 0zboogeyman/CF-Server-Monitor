@@ -4,7 +4,7 @@
 
 **演示地址**：<https://demo.huilang.me/>
 
-**当前Workers版本：V2.8.2 Beta1; Agent版本：1.3.8**
+**当前Workers版本：V2.8.2 Beta2; Agent版本：1.0.1**
 
 > [!IMPORTANT]
 > V2.7.10 加入了 CSP 内容安全策略。Workers 环境通过 HTTP Response Header 下发 CSP，默认只允许同源资源和必要的 Cloudflare/Google Fonts 资源；
@@ -36,6 +36,10 @@
 
 
 ## Agent 版本更新
+Go版本
+- V1.0.1 新增磁盘IO统计（不支持Windows Mac FreeBSD）
+
+Shell版本
 - V1.3.8 修复 8/9 月账期计算中前导零导致的 Shell 八进制解析错误
 - V1.3.7 添加双栈IP获取
 - V1.3.6 添加指定网卡选项，支持指定一个或多个网卡统计网速和月流量，留空保持。优化硬盘统计逻辑。
