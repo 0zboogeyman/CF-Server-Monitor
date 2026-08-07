@@ -895,6 +895,11 @@ Cloudflare D1 免费版提供 5GB 存储和 5M 读取行/日、100K 写入行/�
 1. CF有托管域名的话，绑定一个域名可用解决绝大多数上报问题
 2. 如果没有域名可以绑定，或者绑定域名还是无法访问，可以改本地host解决，本地ping一个cf的cdn ip，改host解析. `echo [ip] [你的项目名.你的子域.workers.dev] | sudo tee -a /etc/hosts`
 
+**Q: Ping结果都是1?**
+
+1. 检查服务器是否开了代理，可以关闭后测试。
+2. openclash会导致延迟测试问题，推荐使用passwall（感谢@chenisme 美馨 提供的解决方案）
+
 </details>
 
 ## 📸 界面预览
