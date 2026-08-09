@@ -2432,6 +2432,7 @@ body::before {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
     background: rgba(0, 0, 0, 0.2);
 }
 
@@ -2449,6 +2450,53 @@ body::before {
 .chart-title-icon {
     color: var(--accent-cyan);
     font-size: 14px;
+}
+
+.chart-header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    min-width: 0;
+    margin-left: auto;
+}
+
+.chart-header-actions > .load-avg-row,
+.chart-header-actions > .net-indicator,
+.chart-header-actions > .ping-indicator,
+.chart-header-actions > .chart-current-value-container {
+    min-width: 0;
+}
+
+.chart-expand-btn {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: border-color 0.2s, color 0.2s, background 0.2s;
+}
+
+.chart-expand-btn:hover,
+.chart-expand-btn:focus-visible,
+.chart-expand-btn.active {
+    border-color: var(--accent-cyan);
+    color: var(--accent-cyan);
+    background: rgba(77, 166, 255, 0.08);
+    outline: none;
+}
+
+.chart-expand-btn svg {
+    width: 16px;
+    height: 16px;
+    pointer-events: none;
 }
 
 .chart-current-value-container {
@@ -3271,6 +3319,10 @@ body.server-row-drag-active * {
 
 .disk-io-header .chart-title {
     flex-shrink: 0;
+}
+
+.disk-io-header .chart-header-actions {
+    flex: 1 1 320px;
 }
 
 .load-1m {
@@ -4142,6 +4194,10 @@ body.mikus-theme .mikus-stats-mascot-img {
     .time-btn {
         padding: 6px 10px;
         font-size: 11px;
+    }
+
+    .chart-expand-btn {
+        display: none;
     }
 
     .host-card-header {
