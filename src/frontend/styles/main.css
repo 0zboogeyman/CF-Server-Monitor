@@ -2690,8 +2690,8 @@ body::before {
 }
 
 .server-row.dragging {
-    opacity: 0.5;
-    background: var(--accent-cyan) !important;
+    opacity: 0.28;
+    background: rgba(77, 166, 255, 0.16) !important;
 }
 
 .server-row.drag-over {
@@ -2703,10 +2703,40 @@ body::before {
     font-size: 12px;
     letter-spacing: -2px;
     cursor: grab;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-user-drag: none;
 }
 
 .drag-handle:hover {
     color: var(--accent-cyan);
+}
+
+body.server-row-drag-active,
+body.server-row-drag-active * {
+    cursor: grabbing !important;
+}
+
+.server-row-drag-ghost {
+    position: fixed;
+    z-index: 10020;
+    pointer-events: none;
+    opacity: 0.96;
+    transform: translateZ(0);
+    filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.35));
+}
+
+.server-row-drag-ghost .terminal-table {
+    width: 100%;
+    min-width: 100%;
+    margin: 0;
+    background: var(--bg-card);
+    border: 1px solid var(--accent-cyan);
+}
+
+.server-row-drag-ghost .server-row {
+    background: var(--bg-hover) !important;
 }
 
 .drag-info {
