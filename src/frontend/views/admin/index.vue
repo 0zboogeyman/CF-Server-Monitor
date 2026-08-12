@@ -165,6 +165,7 @@
           :settings="settings"
           @theme-applied="settings.theme_url = $event"
           @theme-options-applied="handleThemeOptionsApplied"
+          @alert-message="alertMessage = $event"
         />
       </div>
 

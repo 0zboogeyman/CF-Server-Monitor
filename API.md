@@ -850,26 +850,17 @@ https://raw.githubusercontent.com/huilang-me/CFSM-Theme-Store/refs/heads/main/th
     {
       "name": "Example Theme",
       "url": "https://github.com/Tokinx/cf-server-monitor-theme-emerald",
-      "branch": "build",
-      "versions": [
-        {
-          "short_version": "8cea2bb",
-          "title": "update theme to 2024-01-01",
-          "releaseDate": "2024-01-01",
-          "changelog": "update theme",
-          "commitId": "8cea2bbdbadb50684f2e97e13f7b2149ef99911b",
-          "theme_url": "https://github.com/Tokinx/cf-server-monitor-theme-emerald/tree/8cea2bbdbadb50684f2e97e13f7b2149ef99911b"
-        }
-      ]
+      "branch": "build"
     }
   ]
 }
 ```
 
 - 上游对象的其他字段原样保留。
-- 主题对象配置 GitHub 仓库 `url` 和 `branch` 时，会通过 GitHub commits API 读取该分支最近 10 个 commit，并生成可直接写入 `theme_url` 的版本列表；`/theme` 响应里的 `versions` 只由 commits API 生成。commits API 失败时不会刷新内存缓存；已有成功缓存时返回旧缓存，无缓存时该主题 `versions` 返回空数组。管理端主题商店会对空 `versions` 主题执行浏览器端 GitHub commits API fallback 补齐版本下拉。
+- 后端只读取上游 `themes.json`，不调用 GitHub commits API 生成 `versions`。
+- 管理端主题商店默认不请求版本列表；点击主题卡片的“加载版本”后，才会在浏览器端通过 `api.github.com` 读取该主题仓库最近 10 个 commit，并生成可直接写入 `theme_url` 的版本下拉。
 - `schema` 缺失时补为 `1`；`themes` 不是数组时补为空数组；上游 `themes.json` 不需要提供 `versions`。
-- 上游失败时返回已有内存缓存，即使它已经超过 300 秒 TTL；从未成功缓存时返回 `{ "schema": 1, "themes": [] }`，HTTP 状态仍为 `200`。
+- 上游读取失败且没有命中 300 秒内存缓存时返回 `502`，管理端会改由浏览器端访问 `raw.githubusercontent.com` 作为 fallback。
 
 ***
 
