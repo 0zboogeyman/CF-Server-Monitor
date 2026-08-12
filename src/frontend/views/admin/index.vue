@@ -1397,7 +1397,6 @@ const getCustomInstallCommand = () => {
     const ghUrl = buildGhRawUrl(proxy, '/huilang-me/cfsm-agent/main/install.ps1')
     return `$script = "$env:TEMP\\install-cf-probe.ps1"; Invoke-WebRequest -Uri "${ghUrl}" -OutFile $script -UseBasicParsing; PowerShell -ExecutionPolicy Bypass -File $script ${params.join(' ')}`
   }
-  const sudoPrefix = targetOs.value === 'mac' ? 'sudo ' : ''
   const params = ['install']
   if (proxy) params.push(`--install-ghproxy=${proxy}`)
   params.push(
@@ -1417,7 +1416,7 @@ const getCustomInstallCommand = () => {
   if (hasCorrectionValue(rxCorrection.value)) params.push(`-rx_correction=${rxCorrection.value}`)
   if (hasCorrectionValue(txCorrection.value)) params.push(`-tx_correction=${txCorrection.value}`)
   const ghUrl = buildGhRawUrl(proxy, '/huilang-me/cfsm-agent/main/install.sh')
-  return `curl -fsSL ${ghUrl} | ${sudoPrefix}sh -s -- ${params.join(' ')}`
+  return `curl -fsSL ${ghUrl} | sh -s -- ${params.join(' ')}`
 }
 
 const copyCustomCmd = async () => {
