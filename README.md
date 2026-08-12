@@ -4,7 +4,7 @@
 
 **演示地址**：<https://demo.huilang.me/>
 
-**当前Workers版本：V2.8.3 Beta1**
+**当前Workers版本：V2.8.3 Beta2**
 
 > [!IMPORTANT]
 > V2.7.10 加入了 CSP 内容安全策略。Workers 环境通过 HTTP Response Header 下发 CSP，默认只允许同源资源和必要的 Cloudflare/Google Fonts 资源；
@@ -25,7 +25,7 @@
 
 ## Workers 版本更新
 
-- V2.8.3 新增磁盘IO统计，切换默认agent为Go版本。
+- V2.8.3 新增磁盘IO统计，切换默认agent为Go版本。新增服务器延时与丢包率的实时窗口统计功能。
 - V2.8.2 新增 GO 版本支持。
 - V2.8.1 优化长时间历史查询的 D1 读行，增加服务器负载通知，优化主题商店接口。主题新增服务器价值统计面板。主题新增Mikus模式。
 - V2.8.0 新增主题商店功能，支持一键切换主题。

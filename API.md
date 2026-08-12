@@ -491,6 +491,8 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
 | `regionStats` | 按 ISO 区域码（大写）统计的服务器数                                                  |
 | `sysConfig`   | 当前站点开关：`show_price`、`show_expire`、`show_tf`、`show_time`、`display_mode`。主题配置请从 `/api/config` 的 `theme_options` 读取。~~旧版示例中的 `site_title` 不在该对象内。~~（2026-07-26 修订） |
 
+> `latestReportUpdates` 与 `servers[].ping` / `servers[].loss` 读取自 DO 实时状态，并在当前 Worker isolate 内短缓存约 4 分钟。该缓存不跨 isolate 共享，冷启动或缓存过期时会回源 DO。
+
 ***
 
 ### 2.3 `GET /api/server` - 获取单台服务器详情
@@ -542,6 +544,14 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
   "loss_cu": 0,
   "loss_cm": 0,
   "loss_bd": 0,
+  "ping": [
+    { "ts": 1737638280000, "ct": 23, "cu": 25, "cm": 30, "bd": 40 },
+    { "ts": 1737638400000, "ct": 24, "cu": 26, "cm": null, "bd": 42 }
+  ],
+  "loss": [
+    { "ts": 1737638280000, "ct": 0, "cu": 0, "cm": 0, "bd": 0 },
+    { "ts": 1737638400000, "ct": 0, "cu": 0, "cm": 100, "bd": 0 }
+  ],
   "ram_total": 8192,
   "ram_used": 3700,
   "swap_total": 2048,
@@ -1566,6 +1576,7 @@ UUID 缺失或格式非法时返回 `400 { "error": "invalidServerId", "code": 4
 | `udp_conn`                                    | number             | UDP 套接字数                  |
 | `ping_ct` / `ping_cu` / `ping_cm` / `ping_bd` | number\|null\|false | 各运营商延时 (ms)；`false` 表示禁用该节点 |
 | `loss_ct` / `loss_cu` / `loss_cm` / `loss_bd` | number\|null\|false | 各运营商丢包率 (%)；`false` 表示禁用该节点 |
+| `ping` / `loss`                               | array              | DO 缓存的一小时探测窗口；固定 30 个点，每 2 分钟一个槽位；实际采样不足 30 个槽位时，用时间最近的已有点补齐。若窗口最后一点落后当前最新指标超过 2 分钟，后端会用本次响应已查询到的最新指标追加一组点，不增加额外查询。点格式为 `{ ts, ct, cu, cm, bd }`，`ct/cu/cm/bd` 分别对应电信、联通、移动、BGP |
 | `ram_total` / `ram_used`                      | number             | MB                        |
 | `swap_total` / `swap_used`                    | number             | MB                        |
 | `disk_total` / `disk_used`                    | number             | MB                        |
