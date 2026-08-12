@@ -626,8 +626,14 @@ export class MetricsBroadcaster {
       }
 
       const updates = this._getLatestReportUpdates(normalizedServerIds.ids);
-      const latencyWindows = await this._getLatencyWindowUpdates(normalizedServerIds.ids);
-      return new Response(JSON.stringify({ updates, latencyWindows }), {
+      const includeLatencyWindows = body?.includeLatencyWindows !== false;
+      const payload = { updates };
+
+      if (includeLatencyWindows) {
+        payload.latencyWindows = await this._getLatencyWindowUpdates(normalizedServerIds.ids);
+      }
+
+      return new Response(JSON.stringify(payload), {
         headers: {
           'Cache-Control': 'no-store',
           'Content-Type': 'application/json'

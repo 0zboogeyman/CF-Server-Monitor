@@ -11,8 +11,18 @@ function normalizeServerIds(serverIds) {
   ));
 }
 
-function getCacheKey(serverIds) {
-  return normalizeServerIds(serverIds).join('\u0000');
+function normalizeCacheOptions(options = {}) {
+  return {
+    includeLatencyWindows: options?.includeLatencyWindows !== false
+  };
+}
+
+function getCacheKey(serverIds, options = {}) {
+  const idsKey = normalizeServerIds(serverIds).join('\u0000');
+  if (!idsKey) return '';
+
+  const { includeLatencyWindows } = normalizeCacheOptions(options);
+  return `${includeLatencyWindows ? 'with-latency' : 'base'}:${idsKey}`;
 }
 
 function pruneRealtimeStateCache(now = Date.now()) {
@@ -29,15 +39,21 @@ function pruneRealtimeStateCache(now = Date.now()) {
   }
 }
 
-function normalizeRealtimeState(state = {}) {
+function normalizeRealtimeState(state = {}, options = {}) {
+  const { includeLatencyWindows } = normalizeCacheOptions(options);
   return {
     latestReportUpdates: Array.isArray(state.latestReportUpdates) ? state.latestReportUpdates : [],
-    latencyWindows: Array.isArray(state.latencyWindows) ? state.latencyWindows : []
+    latencyWindows: includeLatencyWindows && Array.isArray(state.latencyWindows) ? state.latencyWindows : []
   };
 }
 
-export function getCachedRealtimeState(serverIds, now = Date.now()) {
-  const key = getCacheKey(serverIds);
+export function getCachedRealtimeState(serverIds, options = {}, now = Date.now()) {
+  if (typeof options === 'number') {
+    now = options;
+    options = {};
+  }
+
+  const key = getCacheKey(serverIds, options);
   if (!key) return null;
 
   pruneRealtimeStateCache(now);
@@ -45,20 +61,25 @@ export function getCachedRealtimeState(serverIds, now = Date.now()) {
   if (!entry || now - entry.cachedAt > REALTIME_STATE_CACHE_TTL_MS) return null;
 
   return {
-    ...normalizeRealtimeState(entry),
+    ...normalizeRealtimeState(entry, options),
     cacheHit: true,
     cacheAgeMs: Math.max(0, now - entry.cachedAt)
   };
 }
 
-export function cacheRealtimeState(serverIds, state, cachedAt = Date.now()) {
-  const key = getCacheKey(serverIds);
+export function cacheRealtimeState(serverIds, state, options = {}, cachedAt = Date.now()) {
+  if (typeof options === 'number') {
+    cachedAt = options;
+    options = {};
+  }
+
+  const key = getCacheKey(serverIds, options);
   if (!key) return;
 
   pruneRealtimeStateCache(cachedAt);
   realtimeStateCache.delete(key);
   realtimeStateCache.set(key, {
     cachedAt,
-    ...normalizeRealtimeState(state)
+    ...normalizeRealtimeState(state, options)
   });
 }

@@ -173,11 +173,12 @@ function appendLatestLatencyPoint(server, metrics, timestamp, now = Date.now()) 
   }
 }
 
-async function getDurableRealtimeState(env, serverIds) {
+async function getDurableRealtimeState(env, serverIds, options = {}) {
+  const includeLatencyWindows = options?.includeLatencyWindows !== false;
   const empty = { latestReportUpdates: [], latencyWindows: [] };
   if (!env.METRICS_BROADCASTER || !Array.isArray(serverIds) || serverIds.length === 0) return empty;
 
-  const cachedState = getCachedRealtimeState(serverIds);
+  const cachedState = getCachedRealtimeState(serverIds, { includeLatencyWindows });
   if (cachedState) return cachedState;
 
   try {
@@ -191,16 +192,16 @@ async function getDurableRealtimeState(env, serverIds) {
       const response = await stub.fetch('http://internal/latest-report-updates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serverIds: chunk })
+        body: JSON.stringify({ serverIds: chunk, includeLatencyWindows })
       });
       if (!response.ok) continue;
       const data = await response.json();
       if (Array.isArray(data?.updates)) updates.push(...data.updates);
-      if (Array.isArray(data?.latencyWindows)) latencyWindows.push(...data.latencyWindows);
+      if (includeLatencyWindows && Array.isArray(data?.latencyWindows)) latencyWindows.push(...data.latencyWindows);
     }
 
     const state = { latestReportUpdates: updates, latencyWindows };
-    cacheRealtimeState(serverIds, state);
+    cacheRealtimeState(serverIds, state, { includeLatencyWindows });
     return state;
   } catch (e) {
     console.warn('[Dashboard] Failed to read realtime state:', e?.message || e);
@@ -236,7 +237,8 @@ function mergeLatestReportUpdates(serverIds, durableUpdates, workerUpdates) {
     .filter(Boolean);
 }
 
-async function getRealtimeStateForServers(env, serverIds) {
+async function getRealtimeStateForServers(env, serverIds, options = {}) {
+  const includeLatencyWindows = options?.includeLatencyWindows !== false;
   const normalizedServerIds = Array.from(new Set(
     (Array.isArray(serverIds) ? serverIds : [])
       .map(serverId => String(serverId || '').trim())
@@ -246,7 +248,7 @@ async function getRealtimeStateForServers(env, serverIds) {
     return { latestReportUpdates: [], latencyWindows: [] };
   }
 
-  const durableState = await getDurableRealtimeState(env, normalizedServerIds);
+  const durableState = await getDurableRealtimeState(env, normalizedServerIds, { includeLatencyWindows });
   const durableLatestReportUpdates = durableState.latestReportUpdates;
 
   // DO 命中后反向预热当前 Worker isolate，降低随后 DO 休眠造成的空缓存概率。
@@ -260,7 +262,7 @@ async function getRealtimeStateForServers(env, serverIds) {
       durableLatestReportUpdates,
       getWorkerLatestReportUpdates(normalizedServerIds)
     ),
-    latencyWindows: durableState.latencyWindows
+    latencyWindows: includeLatencyWindows ? durableState.latencyWindows : []
   };
 }
 
@@ -281,11 +283,9 @@ export async function handleServerAPI(request, env, sys) {
   
   const [latestMetrics, realtimeState] = await Promise.all([
     getLatestMetrics(env.DB, id, server),
-    getRealtimeStateForServers(env, [id])
+    getRealtimeStateForServers(env, [id], { includeLatencyWindows: false })
   ]);
   mergeMetricsIntoServer(server, latestMetrics);
-  attachLatencyWindowsToServers([server], realtimeState.latencyWindows);
-  appendLatestLatencyPoint(server, latestMetrics, latestMetrics?.timestamp);
   server.latestReportUpdates = realtimeState.latestReportUpdates;
   server.sysConfig = {
     long_history_points: Number(normalizeLongHistoryPoints(sys.long_history_points))
