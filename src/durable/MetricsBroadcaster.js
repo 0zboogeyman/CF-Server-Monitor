@@ -475,6 +475,17 @@ export class MetricsBroadcaster {
     return sessionScope === serverId;
   }
 
+  _getFrontendWebSockets() {
+    return this.state.getWebSockets().filter(ws => {
+      const attachment = ws.deserializeAttachment();
+      return !attachment || attachment.kind !== AGENT_REPORT_KIND;
+    });
+  }
+
+  _getFrontendSubscriberCount() {
+    return this._getFrontendWebSockets().length;
+  }
+
   _isWebSocketUpgrade(request) {
     const upgradeHeader = request.headers.get('Upgrade');
     return !!upgradeHeader && upgradeHeader.toLowerCase() === 'websocket';
@@ -915,6 +926,12 @@ export class MetricsBroadcaster {
       }
 
       const reportTs = Date.now();
+      const subscribers = this._getFrontendSubscriberCount();
+      if (subscribers === 0) {
+        return new Response(JSON.stringify({ ok: true, skipped: true, subscribers: 0 }), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
       if (this._shouldCacheResourceAlertSamples(reportTs)) {
         await this._ensureResourceAlertSnapshotLoaded();
         await this._cacheResourceAlertSamples([{
@@ -927,8 +944,7 @@ export class MetricsBroadcaster {
         samples: [{ ts: reportTs, data: payload }]
       }], reportTs);
       this._broadcast(serverId, payload);
-      const count = this.state.getWebSockets().length;
-      return new Response(JSON.stringify({ ok: true, subscribers: count }), {
+      return new Response(JSON.stringify({ ok: true, subscribers }), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
@@ -962,11 +978,18 @@ export class MetricsBroadcaster {
         });
       }
 
+      const maintainState = body?.maintainState === true;
+      const subscribers = this._getFrontendSubscriberCount();
+      if (!maintainState && subscribers === 0) {
+        return new Response(JSON.stringify({ ok: true, skipped: true, count: normalizedUpdates.length, subscribers: 0 }), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
       const reportTs = Date.now();
       await this._ingestRealtimeUpdates(normalizedUpdates, reportTs);
 
-      const count = this.state.getWebSockets().length;
-      return new Response(JSON.stringify({ ok: true, count: normalizedUpdates.length, subscribers: count }), {
+      return new Response(JSON.stringify({ ok: true, count: normalizedUpdates.length, subscribers }), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
@@ -1043,8 +1066,9 @@ export class MetricsBroadcaster {
 
     // ── 3) 健康检查 ────────────────────────────────────
     if (method === 'GET' && (path === '/health' || path.endsWith('/health'))) {
-      const count = this.state.getWebSockets().length;
-      return new Response(JSON.stringify({ ok: true, subscribers: count }), {
+      const subscribers = this._getFrontendSubscriberCount();
+      const sockets = this.state.getWebSockets().length;
+      return new Response(JSON.stringify({ ok: true, subscribers, sockets }), {
         headers: { 'Content-Type': 'application/json' }
       });
     }
@@ -1555,12 +1579,11 @@ export class MetricsBroadcaster {
   }
 
   _broadcastBatch(updates, ts = Date.now()) {
-    const websockets = this.state.getWebSockets();
+    const websockets = this._getFrontendWebSockets();
 
     for (const ws of websockets) {
       const attachment = ws.deserializeAttachment();
       if (!attachment) continue;
-      if (attachment.kind === AGENT_REPORT_KIND) continue;
 
       const scopedUpdates = updates
         .filter(item => this._shouldDeliver(attachment.scope, item.serverId, attachment.serverIds))

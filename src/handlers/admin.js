@@ -282,6 +282,18 @@ async function fetchCloudflareUsage(token, accountId, range) {
         ) {
           sum { requests }
         }
+        durableObjectsInvocationsAdaptiveGroups(
+          limit: 10000
+          filter: { date_geq: $start, date_leq: $end }
+        ) {
+          sum { requests }
+        }
+        durableObjectsPeriodicGroups(
+          limit: 10000
+          filter: { date_geq: $start, date_leq: $end }
+        ) {
+          sum { duration }
+        }
       }
     }
   }`;
@@ -302,7 +314,20 @@ async function fetchCloudflareUsage(token, accountId, range) {
   const workersRequests = (account.workersInvocationsAdaptive || []).reduce((total, group) => {
     return total + Number(group.sum?.requests || 0);
   }, 0);
-  return { rowsRead: usage.rowsRead, rowsWritten: usage.rowsWritten, workersRequests, databaseCount: groups.length };
+  const durableObjectsRequests = (account.durableObjectsInvocationsAdaptiveGroups || []).reduce((total, group) => {
+    return total + Number(group.sum?.requests || 0);
+  }, 0);
+  const durableObjectsDuration = (account.durableObjectsPeriodicGroups || []).reduce((total, group) => {
+    return total + Number(group.sum?.duration || 0);
+  }, 0);
+  return {
+    rowsRead: usage.rowsRead,
+    rowsWritten: usage.rowsWritten,
+    workersRequests,
+    durableObjectsRequests,
+    durableObjectsDuration,
+    databaseCount: groups.length
+  };
 }
 
 async function getD1DailyUsage(token, accountId) {
@@ -320,14 +345,18 @@ async function getD1DailyUsage(token, accountId) {
   const yesterday = {
     rowsRead: yesterdayUsage.rowsRead,
     rowsWritten: yesterdayUsage.rowsWritten,
-    workersRequests: yesterdayUsage.workersRequests
+    workersRequests: yesterdayUsage.workersRequests,
+    durableObjectsRequests: yesterdayUsage.durableObjectsRequests,
+    durableObjectsDuration: yesterdayUsage.durableObjectsDuration
   };
 
   return {
     today: {
       rowsRead: todayUsage.rowsRead,
       rowsWritten: todayUsage.rowsWritten,
-      workersRequests: todayUsage.workersRequests
+      workersRequests: todayUsage.workersRequests,
+      durableObjectsRequests: todayUsage.durableObjectsRequests,
+      durableObjectsDuration: todayUsage.durableObjectsDuration
     },
     yesterday
   };

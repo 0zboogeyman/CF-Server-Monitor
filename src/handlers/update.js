@@ -3,8 +3,12 @@ import { getServerDetail, clearServerDetailCache } from '../utils/cache.js';
 import { mergeMetricsIntoServer, coerceNumericMetricFields } from '../utils/metrics.js';
 import { createErrorResponse, createUnauthorizedResponse, createNotFoundResponse, createBadRequestResponse } from '../utils/errors.js';
 import { ensureServerOptimization } from '../database/indexOptimization.js';
-import { loadSiteSettings } from '../utils/settings.js';
+import { getResourceAlertConfig, loadSiteSettings } from '../utils/settings.js';
 import { cacheLatestReportUpdate } from '../utils/latestReportCache.js';
+import {
+  hasRecentFrontendRealtimeActivity,
+  markFrontendRealtimeActive
+} from '../utils/realtimeBroadcastGate.js';
 import {
   AGENT_CONFIG_MD5_HEADER,
   AGENT_CONFIG_SCHEMA_HEADER,
@@ -30,8 +34,10 @@ function buildPayloadForBroadcast(id, metrics = {}, extra = {}) {
 // 批量推送：5秒窗口内合并向 DO 推送一次，减少请求次数
 const BATCH_WINDOW = 5000;
 const MAX_BATCH_SAMPLES = 300;
+const FRONTEND_SUBSCRIBER_CHECK_INTERVAL_MS = 5 * 60 * 1000;
 let batchQueue = new Map();
 let flushingPromise = null;
+let frontendSubscriberSnapshot = { checkedAt: 0, count: 0 };
 
 // 用于过滤不需要实时更新的字段
 const BROADCAST_DELETE_FIELDS = ['id', 'name', 'region', 'arch', 'os', 'kernel_version', 'cpu_info', 'cpu_cores', 'expire_date', 'server_group', 'traffic_limit', 'net_rx_monthly', 'net_tx_monthly', 'boot_time', 'timestamp', 'ip_v4', 'ip_v6'];
@@ -132,6 +138,58 @@ function queueBroadcastSamples(serverId, samples) {
   batchQueue.set(serverId, { samples: merged.slice(-MAX_BATCH_SAMPLES) });
 }
 
+async function getCachedFrontendSubscriberCount(env) {
+  const now = Date.now();
+  if (now - frontendSubscriberSnapshot.checkedAt < FRONTEND_SUBSCRIBER_CHECK_INTERVAL_MS) {
+    return frontendSubscriberSnapshot.count;
+  }
+
+  let count = 0;
+  try {
+    const id = env.METRICS_BROADCASTER.idFromName('global');
+    const stub = env.METRICS_BROADCASTER.get(id);
+    const response = await stub.fetch('http://internal/health', {
+      headers: { 'Cache-Control': 'no-store' }
+    });
+    if (response.ok) {
+      const data = await response.json();
+      count = Math.max(0, Number(data?.subscribers) || 0);
+    }
+  } catch (e) {
+    console.warn('[broadcast] subscriber check failed:', e?.message || e);
+  }
+
+  frontendSubscriberSnapshot = { checkedAt: now, count };
+  return count;
+}
+
+async function getRealtimeBatchIntent(env) {
+  if (!env?.METRICS_BROADCASTER) return null;
+
+  let resourceAlertEnabled = false;
+  try {
+    const settings = await loadSiteSettings(env.DB);
+    resourceAlertEnabled = !!settings?.tg_bot_token && getResourceAlertConfig(settings).enabled;
+  } catch (e) {
+    console.warn('[broadcast] failed to load realtime gate settings:', e?.message || e);
+  }
+
+  if (resourceAlertEnabled || hasRecentFrontendRealtimeActivity()) {
+    return {
+      maintainState: resourceAlertEnabled
+    };
+  }
+
+  const subscribers = await getCachedFrontendSubscriberCount(env);
+  if (subscribers <= 0) {
+    return null;
+  }
+
+  return {
+    maintainState: false
+  };
+}
+
 async function _flushBatch(env) {
   flushingPromise = null;
 
@@ -155,12 +213,15 @@ async function _flushBatch(env) {
   if (updates.length === 0) return;
 
   try {
+    const intent = await getRealtimeBatchIntent(env);
+    if (!intent) return;
+
     const id = env.METRICS_BROADCASTER.idFromName('global');
     const stub = env.METRICS_BROADCASTER.get(id);
     await stub.fetch('http://internal/batch-push', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ updates })
+      body: JSON.stringify({ updates, maintainState: intent.maintainState })
     });
   } catch (e) {
     console.warn('[broadcast] batch push failed:', e.message || e);
@@ -354,7 +415,11 @@ async function forwardWebSocketUpgrade(request, env, internalPath, logPrefix) {
 }
 
 export async function handleWebSocketUpgrade(request, env) {
-  return forwardWebSocketUpgrade(request, env, '/ws', '[ws]');
+  const response = await forwardWebSocketUpgrade(request, env, '/ws', '[ws]');
+  if (response?.status === 101) {
+    markFrontendRealtimeActive();
+  }
+  return response;
 }
 
 export async function handleUpdateWebSocketUpgrade(request, env) {

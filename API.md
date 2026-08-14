@@ -41,7 +41,7 @@
   - [3.2](#32-action-login---登录) [`action: login`](#32-action-login---登录) [- 登录](#32-action-login---登录)
   - [3.3](#33-action-get_settings---读取全部设置) [`action: get_settings`](#33-action-get_settings---读取全部设置) [- 读取全部设置](#33-action-get_settings---读取全部设置)
   - [3.4](#34-action-list---列出全部服务器含在线统计) [`action: list`](#34-action-list---列出全部服务器含在线统计) [- 列出全部服务器（含在线/统计）](#34-action-list---列出全部服务器含在线统计)
-  - [3.5](#35-action-d1_usage---d1--workers-用量) [`action: d1_usage`](#35-action-d1_usage---d1--workers-用量) [- D1 / Workers 用量](#35-action-d1_usage---d1--workers-用量)
+  - [3.5](#35-action-d1_usage---d1--workers--durable-objects-用量) [`action: d1_usage`](#35-action-d1_usage---d1--workers--durable-objects-用量) [- D1 / Workers / Durable Objects 用量](#35-action-d1_usage---d1--workers--durable-objects-用量)
   - [3.6](#36-action-save_settings---保存设置) [`action: save_settings`](#36-action-save_settings---保存设置) [- 保存设置](#36-action-save_settings---保存设置)
   - [3.6.1](#361-action-start_theme_preview---生成主题预览授权) [`action: start_theme_preview`](#361-action-start_theme_preview---生成主题预览授权) [- 生成主题预览授权](#361-action-start_theme_preview---生成主题预览授权)
   - [3.6.2](#362-action-clear_theme_preview_auth---清除主题预览授权) [`action: clear_theme_preview_auth`](#362-action-clear_theme_preview_auth---清除主题预览授权) [- 清除主题预览授权](#362-action-clear_theme_preview_auth---清除主题预览授权)
@@ -1090,7 +1090,7 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled` 或
 
 ***
 
-### 3.5 `action: d1_usage` - D1 / Workers 用量
+### 3.5 `action: d1_usage` - D1 / Workers / Durable Objects 用量
 
 **Request**
 
@@ -1113,19 +1113,23 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled` 或
     "today": {
       "rowsRead": 12345,
       "rowsWritten": 678,
-      "workersRequests": 1234
+      "workersRequests": 1234,
+      "durableObjectsRequests": 345,
+      "durableObjectsDuration": 12.34
     },
     "yesterday": {
       "rowsRead": 23456,
       "rowsWritten": 789,
-      "workersRequests": 2345
+      "workersRequests": 2345,
+      "durableObjectsRequests": 456,
+      "durableObjectsDuration": 23.45
     }
   },
   "message": "d1UsageQueried"
 }
 ```
 
-> ~~响应会返回日期、套餐限额、剩余额度、数据库数量和 Account ID。~~ **2026-07-26 修订**：当前只返回两个时间范围的 `rowsRead`、`rowsWritten`、`workersRequests`；额度由前端自行展示，不属于 API 响应。
+> ~~响应会返回日期、套餐限额、剩余额度、数据库数量和 Account ID。~~ **2026-07-26 修订**：当前返回两个时间范围的 `rowsRead`、`rowsWritten`、`workersRequests`、`durableObjectsRequests`、`durableObjectsDuration`；额度由前端自行展示，不属于 API 响应。`durableObjectsDuration` 单位为 GB-s。
 >
 > **统计窗口**：`today` 为 UTC 当日 `00:00:00` 至 `23:59:59`；`yesterday` 为 UTC 昨日 `00:00:00` 至 `23:59:59`。
 
@@ -1139,6 +1143,8 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled` 或
 >
 > - `d1AnalyticsAdaptiveGroups`（`rowsRead` / `rowsWritten`）
 > - `workersInvocationsAdaptive`（`requests`）
+> - `durableObjectsInvocationsAdaptiveGroups`（`requests`）
+> - `durableObjectsPeriodicGroups`（`duration`，单位 GB-s）
 
 ***
 
@@ -1568,8 +1574,10 @@ UUID 缺失或格式非法时返回 `400 { "error": "invalidServerId", "code": 4
 **Response 200**
 
 ```json
-{ "ok": true, "subscribers": 3 }
+{ "ok": true, "subscribers": 3, "sockets": 4 }
 ```
+
+`subscribers` 为前端实时订阅 WebSocket 数；`sockets` 为 DO 当前托管的全部 WebSocket 数，包含 Agent 上报 WSS 连接。
 
 或
 
