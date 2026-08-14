@@ -1,6 +1,11 @@
 import { saveMetricsHistory } from '../database/schema.js';
 import { getServerDetail, clearServerDetailCache } from '../utils/cache.js';
-import { mergeMetricsIntoServer, coerceNumericMetricFields } from '../utils/metrics.js';
+import {
+  DISK_IO_FIELD_TO_COLUMN,
+  DISK_IO_METRIC_FIELDS,
+  mergeMetricsIntoServer,
+  coerceNumericMetricFields
+} from '../utils/metrics.js';
 import { createErrorResponse, createUnauthorizedResponse, createNotFoundResponse, createBadRequestResponse } from '../utils/errors.js';
 import { ensureServerOptimization } from '../database/indexOptimization.js';
 import { getResourceAlertConfig, loadSiteSettings } from '../utils/settings.js';
@@ -32,12 +37,34 @@ function buildPayloadForBroadcast(id, metrics = {}, extra = {}) {
   return coerceNumericMetricFields(payload);
 }
 
-// 批量推送：5秒窗口内合并向 DO 推送一次，减少请求次数
-const BATCH_WINDOW = 5000;
+// 批量推送：前端实时使用短窗口；仅资源告警缓存时使用较长窗口降低 DO 请求。
+const REALTIME_BATCH_WINDOW_MS = 5 * 1000;
+const RESOURCE_ALERT_BATCH_WINDOW_MS = 25 * 1000;
 const MAX_BATCH_SAMPLES = 300;
 const FRONTEND_SUBSCRIBER_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+const HISTORY_AGGREGATION_MAX_FIELDS = [
+  'net_in_speed', 'net_out_speed',
+  'disk_read_bps', 'disk_write_bps', 'disk_read_iops',
+  'disk_write_iops', 'disk_await_ms', 'disk_util',
+  'processes', 'tcp_conn', 'udp_conn'
+];
+const HISTORY_AGGREGATION_AVG_FIELDS = [
+  'cpu', 'ram_used', 'swap_used',
+  'ping_ct', 'ping_cu', 'ping_cm', 'ping_bd',
+  'loss_ct', 'loss_cu', 'loss_cm', 'loss_bd'
+];
+const HISTORY_METRIC_AGGREGATION_POLICY = Object.freeze({
+  ...Object.fromEntries(HISTORY_AGGREGATION_MAX_FIELDS.map(field => [field, 'max'])),
+  ...Object.fromEntries(HISTORY_AGGREGATION_AVG_FIELDS.map(field => [field, 'avg']))
+});
+const DISK_IO_COLUMN_TO_FIELD = Object.freeze(Object.fromEntries(
+  DISK_IO_METRIC_FIELDS.map(field => [DISK_IO_FIELD_TO_COLUMN[field], field])
+));
 let batchQueue = new Map();
 let flushingPromise = null;
+let flushTimer = null;
+let flushDueAt = 0;
+let resolveFlushingPromise = null;
 let frontendSubscriberSnapshot = { checkedAt: 0, count: 0 };
 
 // 用于过滤不需要实时更新的字段
@@ -98,6 +125,143 @@ export function getReportMetrics(data, latestSample) {
     ...reportMetrics,
     ...(latestSample?.metrics || {})
   };
+}
+
+function hasOwnMetric(source, field) {
+  return !!source && Object.prototype.hasOwnProperty.call(source, field);
+}
+
+function isPlainMetricObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function toFiniteHistoryMetricNumber(value) {
+  if (value === false || value === 'false' || value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function getHistoryMetricSourceValue(source, field) {
+  if (!isPlainMetricObject(source)) return null;
+
+  if (hasOwnMetric(source, field)) {
+    return source[field];
+  }
+
+  const diskField = DISK_IO_COLUMN_TO_FIELD[field];
+  if (diskField && isPlainMetricObject(source.disk) && hasOwnMetric(source.disk, diskField)) {
+    return source.disk[diskField];
+  }
+
+  return null;
+}
+
+function getSampleMetricSource(sample) {
+  if (!isPlainMetricObject(sample)) return null;
+  return sample.metrics || sample.data || sample.payload || sample;
+}
+
+function createEmptyHistoryMetricAggregate() {
+  return { max: {}, avg: {} };
+}
+
+export function mergeHistoryMetricAggregates(...aggregates) {
+  const result = createEmptyHistoryMetricAggregate();
+
+  for (const aggregate of aggregates) {
+    if (!isPlainMetricObject(aggregate)) continue;
+
+    if (isPlainMetricObject(aggregate.max)) {
+      for (const [field, value] of Object.entries(aggregate.max)) {
+        const number = toFiniteHistoryMetricNumber(value);
+        if (number === null) continue;
+        if (!hasOwnMetric(result.max, field) || number > result.max[field]) {
+          result.max[field] = number;
+        }
+      }
+    }
+
+    if (isPlainMetricObject(aggregate.avg)) {
+      for (const [field, item] of Object.entries(aggregate.avg)) {
+        if (!isPlainMetricObject(item)) continue;
+        const sum = toFiniteHistoryMetricNumber(item.sum);
+        const count = Number(item.count);
+        if (sum === null || !Number.isFinite(count) || count <= 0) continue;
+        if (!result.avg[field]) {
+          result.avg[field] = { sum: 0, count: 0 };
+        }
+        result.avg[field].sum += sum;
+        result.avg[field].count += count;
+      }
+    }
+  }
+
+  return result;
+}
+
+function addHistoryMetricAggregateSource(aggregate, source) {
+  if (!isPlainMetricObject(source)) return;
+
+  for (const [field, policy] of Object.entries(HISTORY_METRIC_AGGREGATION_POLICY)) {
+    const value = toFiniteHistoryMetricNumber(getHistoryMetricSourceValue(source, field));
+    if (value === null) continue;
+
+    if (policy === 'max') {
+      if (!hasOwnMetric(aggregate.max, field) || value > aggregate.max[field]) {
+        aggregate.max[field] = value;
+      }
+    } else if (policy === 'avg') {
+      if (!aggregate.avg[field]) {
+        aggregate.avg[field] = { sum: 0, count: 0 };
+      }
+      aggregate.avg[field].sum += value;
+      aggregate.avg[field].count += 1;
+    }
+  }
+}
+
+export function collectHistoryMetricAggregates(samples = [], previousAggregate = null) {
+  const aggregate = mergeHistoryMetricAggregates(previousAggregate);
+  for (const sample of Array.isArray(samples) ? samples : []) {
+    addHistoryMetricAggregateSource(aggregate, getSampleMetricSource(sample));
+  }
+  return aggregate;
+}
+
+function setHistoryMetricResultValue(result, field, value) {
+  const diskField = DISK_IO_COLUMN_TO_FIELD[field];
+  if (diskField) {
+    result[field] = value;
+    result.disk = isPlainMetricObject(result.disk)
+      ? { ...result.disk, [diskField]: value }
+      : { [diskField]: value };
+    return;
+  }
+
+  result[field] = value;
+}
+
+export function applyHistoryMetricAggregates(metrics = {}, aggregate = null) {
+  const result = { ...(metrics || {}) };
+  const mergedAggregate = mergeHistoryMetricAggregates(aggregate);
+
+  for (const [field, value] of Object.entries(mergedAggregate.max)) {
+    setHistoryMetricResultValue(result, field, value);
+  }
+
+  for (const [field, item] of Object.entries(mergedAggregate.avg)) {
+    if (!item || !Number.isFinite(item.sum) || !Number.isFinite(item.count) || item.count <= 0) continue;
+    setHistoryMetricResultValue(result, field, item.sum / item.count);
+  }
+
+  return result;
+}
+
+export function getHistoryMetrics(data, samples, latestSample) {
+  return applyHistoryMetricAggregates(
+    getReportMetrics(data, latestSample),
+    collectHistoryMetricAggregates(samples)
+  );
 }
 
 function buildSamplePayloadForBroadcast(metrics = {}, timestamp = Date.now()) {
@@ -175,9 +339,16 @@ async function getRealtimeBatchIntent(env) {
     console.warn('[broadcast] failed to load realtime gate settings:', e?.message || e);
   }
 
-  if (resourceAlertEnabled || hasRecentFrontendRealtimeActivity()) {
+  const frontendActive = hasRecentFrontendRealtimeActivity();
+  if (frontendActive) {
     return {
       maintainState: resourceAlertEnabled
+    };
+  }
+
+  if (resourceAlertEnabled) {
+    return {
+      maintainState: true
     };
   }
 
@@ -191,9 +362,22 @@ async function getRealtimeBatchIntent(env) {
   };
 }
 
-async function _flushBatch(env) {
-  flushingPromise = null;
+async function getBatchFlushDelayMs(env, now = Date.now()) {
+  if (hasRecentFrontendRealtimeActivity(now)) return REALTIME_BATCH_WINDOW_MS;
 
+  try {
+    const settings = await loadSiteSettings(env.DB);
+    if (settings?.tg_bot_token && getResourceAlertConfig(settings).enabled) {
+      return RESOURCE_ALERT_BATCH_WINDOW_MS;
+    }
+  } catch (e) {
+    console.warn('[broadcast] failed to load batch delay settings:', e?.message || e);
+  }
+
+  return REALTIME_BATCH_WINDOW_MS;
+}
+
+async function _flushBatch(env) {
   if (batchQueue.size === 0) return;
 
   // 原子性地取出当前队列，避免并发写入干扰
@@ -230,10 +414,43 @@ async function _flushBatch(env) {
 }
 
 function _ensureBatchFlush(env) {
-  if (flushingPromise) return flushingPromise;
+  const now = Date.now();
+  if (flushingPromise) {
+    if (
+      hasRecentFrontendRealtimeActivity(now) &&
+      flushDueAt > now + REALTIME_BATCH_WINDOW_MS
+    ) {
+      if (flushTimer) clearTimeout(flushTimer);
+      flushDueAt = now + REALTIME_BATCH_WINDOW_MS;
+      flushTimer = setTimeout(() => {
+        const resolve = resolveFlushingPromise;
+        flushTimer = null;
+        flushDueAt = 0;
+        resolveFlushingPromise = null;
+        _flushBatch(env).finally(() => {
+          flushingPromise = null;
+          if (resolve) resolve();
+        });
+      }, REALTIME_BATCH_WINDOW_MS);
+    }
+    return flushingPromise;
+  }
 
-  flushingPromise = new Promise(resolve => setTimeout(resolve, BATCH_WINDOW))
-    .then(() => _flushBatch(env));
+  flushingPromise = getBatchFlushDelayMs(env, now).then(delayMs => new Promise(resolve => {
+    resolveFlushingPromise = resolve;
+    const normalizedDelayMs = Math.max(0, Number(delayMs) || REALTIME_BATCH_WINDOW_MS);
+    flushDueAt = Date.now() + normalizedDelayMs;
+    flushTimer = setTimeout(() => {
+      const currentResolve = resolveFlushingPromise;
+      flushTimer = null;
+      flushDueAt = 0;
+      resolveFlushingPromise = null;
+      _flushBatch(env).finally(() => {
+        flushingPromise = null;
+        if (currentResolve) currentResolve();
+      });
+    }, normalizedDelayMs);
+  }));
 
   return flushingPromise;
 }
@@ -308,11 +525,12 @@ export async function handleUpdate(request, env, ctx) {
     // 获取最后一条插入（如果是批量数据，取最后一个样本）
     const latestSample = samples[samples.length - 1];
     const latestMetrics = getReportMetrics(data, latestSample);
+    const historyMetrics = getHistoryMetrics(data, samples, latestSample);
     await saveMetricsHistory(
       env.DB,
       id,
       historyPartitionId,
-      latestMetrics,
+      historyMetrics,
       regionCode,
       latestSample.ts,
       agentVersion

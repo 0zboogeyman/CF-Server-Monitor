@@ -297,7 +297,7 @@ npm run build:github-page
 | 钉钉          | 自定义机器人 Webhook URL                                               | 留空          |
 | OneBot / QQ | `onebot:http://host/send_private_msg?...` 或 `send_group_msg`     | 用户 ID 或群 ID |
 | Bark        | `https://api.day.app/xxxx/` 或 `bark:https://example.com/xxxx/`   | 留空          |
-| Server 酱    | `https://sctapi.ftqq.com/<SendKey>.send`                         | 留空          |
+| Server 酱    | `https://sctapi.ftqq.com/<SendKey>.send` 或 `server:https://example.com/<SendKey>.send` | 留空          |
 | WxPusher    | `https://wxpusher.zjiecode.com/api/send/message/[SPT_xxx]/Hello` | 留空          |
 | Gotify      | `https://gotify.example.com/message?token=xxx`                   | 留空          |
 

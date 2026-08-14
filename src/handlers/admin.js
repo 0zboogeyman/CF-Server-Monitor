@@ -15,7 +15,7 @@ import { detectBillingCycle, detectCurrencySymbol, normalizeBillingCycle, normal
 const PING_NODE_FIELDS = ['custom_ct', 'custom_cu', 'custom_cm', 'custom_bd'];
 const THEME_PREVIEW_AUTH_COOKIE = 'cfsm_theme_preview_auth';
 const THEME_PREVIEW_AUTH_TTL = 600;
-const DURABLE_OBJECTS_WEBSOCKET_MESSAGE_BILLING_RATIO = 20;
+const DURABLE_OBJECTS_WEBSOCKET_MESSAGE_BILLING_RATIO = 19;
 
 function normalizeBooleanFlag(value) {
   return value === true || value === 1 || value === '1' || value === 'true' ? '1' : '0';

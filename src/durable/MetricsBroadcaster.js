@@ -23,7 +23,10 @@ import {
   serializeCorrection
 } from '../utils/agentConfig.js';
 import {
+  applyHistoryMetricAggregates,
+  collectHistoryMetricAggregates,
   getReportMetrics,
+  mergeHistoryMetricAggregates,
   normalizeAgentVersion,
   normalizeCorrectionValue,
   normalizeMetricSamples,
@@ -39,12 +42,14 @@ const DEFAULT_AGENT_HISTORY_WRITE_INTERVAL_MS = 60 * 1000;
 const ALLOWED_AGENT_REPORT_INTERVALS = new Set([30, 60, 120, 180]);
 const AGENT_SERVER_DETAIL_TTL_MS = 120 * 1000;
 const AGENT_REALTIME_REPORT_DIVISOR = 20;
+const RESOURCE_ALERT_AGENT_REPORT_INTERVAL_MS = 60 * 1000;
 const LATEST_REPORT_TTL_MS = 5 * 60 * 1000;
 const MAX_LATEST_REPORT_SERVERS = 1000;
 const RESOURCE_ALERT_STORAGE_KEY = 'resource_alert_windows_v1';
 const RESOURCE_ALERT_BUCKET_MS = 60 * 1000;
 const RESOURCE_ALERT_MAX_BUCKETS = 10;
 const RESOURCE_ALERT_MAX_SERVERS = 1000;
+const RESOURCE_ALERT_EVALUATE_RULE_BATCH_MAX = 20;
 const RESOURCE_ALERT_SNAPSHOT_INTERVAL_MS = 60 * 1000;
 const RESOURCE_ALERT_CACHE_ACTIVE_GRACE_MS = 3 * 60 * 1000;
 const RESOURCE_ALERT_LATEST_TOLERANCE_MS = 2 * 60 * 1000;
@@ -160,11 +165,16 @@ function maskPublicIpUpdate(update) {
 }
 
 function normalizeResourceAlertSample(sample) {
-  if (!sample || typeof sample !== 'object' || !sample.data || typeof sample.data !== 'object') {
+  if (!sample || typeof sample !== 'object') {
     return null;
   }
 
-  const metrics = sample.data.metrics || sample.data.payload || sample.data;
+  const data = sample.data || sample.payload || sample.metrics;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    return null;
+  }
+
+  const metrics = data.metrics || data.payload || data;
   const ts = normalizeMetricTimestamp(sample.ts || sample.timestamp || metrics.sample_timestamp || metrics.last_updated || metrics.timestamp);
   const cpu = toFiniteNumber(metrics.cpu);
   const ramTotal = toFiniteNumber(metrics.ram_total);
@@ -478,6 +488,69 @@ export class MetricsBroadcaster {
       normalized.push(value);
     }
     return { ok: true, ids: normalized };
+  }
+
+  _normalizeResourceAlertServerIds(ids) {
+    if (!Array.isArray(ids) || ids.length > RESOURCE_ALERT_MAX_SERVERS) {
+      return { ok: false, ids: [] };
+    }
+
+    const seen = new Set();
+    const normalized = [];
+    for (const id of ids) {
+      if (typeof id !== 'string') {
+        return { ok: false, ids: [] };
+      }
+
+      const value = id.trim();
+      if (!this._isValidServerId(value)) {
+        return { ok: false, ids: [] };
+      }
+
+      if (seen.has(value)) continue;
+      seen.add(value);
+      normalized.push(value);
+    }
+    return { ok: true, ids: normalized };
+  }
+
+  _normalizeResourceAlertEvaluationRules(rules) {
+    if (
+      !Array.isArray(rules) ||
+      rules.length === 0 ||
+      rules.length > RESOURCE_ALERT_EVALUATE_RULE_BATCH_MAX
+    ) {
+      return { ok: false, rules: [] };
+    }
+
+    const normalized = [];
+    for (const rule of rules) {
+      if (!rule || typeof rule !== 'object' || Array.isArray(rule)) {
+        return { ok: false, rules: [] };
+      }
+
+      const ruleId = typeof rule.ruleId === 'string'
+        ? rule.ruleId.trim()
+        : String(rule.ruleId || '').trim();
+      if (!this._isValidServerId(ruleId)) {
+        return { ok: false, rules: [] };
+      }
+
+      const serverIds = this._normalizeResourceAlertServerIds(rule.serverIds);
+      if (!serverIds.ok) {
+        return { ok: false, rules: [] };
+      }
+
+      normalized.push({
+        ruleId,
+        serverIds: serverIds.ids,
+        mode: rule.mode,
+        windowMinutes: rule.windowMinutes,
+        thresholds: rule.thresholds
+      });
+    }
+
+    return { ok: true, rules: normalized };
   }
 
   _closeInvalidSubscription(ws) {
@@ -880,16 +953,44 @@ export class MetricsBroadcaster {
     this._broadcastBatch(normalizedUpdates, reportTs);
   }
 
-  _hasAgentRealtimeConsumers(now = Date.now()) {
-    return this._getFrontendSubscriberCount() > 0 || this._shouldCacheResourceAlertSamples(now);
+  _getAgentRealtimeState(now = Date.now()) {
+    const frontendActive = this._getFrontendSubscriberCount() > 0;
+    const resourceAlertActive = this._shouldCacheResourceAlertSamples(now);
+    return {
+      frontendActive,
+      resourceAlertActive,
+      realtimeActive: frontendActive || resourceAlertActive
+    };
   }
 
-  _getAgentNextWssReportAfterMs(reportIntervalMs, realtimeActive) {
+  _normalizeRealtimeState(realtimeState) {
+    if (realtimeState && typeof realtimeState === 'object') {
+      return {
+        frontendActive: realtimeState.frontendActive === true,
+        resourceAlertActive: realtimeState.resourceAlertActive === true,
+        realtimeActive: realtimeState.realtimeActive === true ||
+          realtimeState.frontendActive === true ||
+          realtimeState.resourceAlertActive === true
+      };
+    }
+    return {
+      frontendActive: realtimeState === true,
+      resourceAlertActive: false,
+      realtimeActive: realtimeState === true
+    };
+  }
+
+  _getAgentNextWssReportAfterMs(reportIntervalMs, realtimeState) {
     const historyIntervalMs = Math.max(
       1000,
       Number(reportIntervalMs) || DEFAULT_AGENT_HISTORY_WRITE_INTERVAL_MS
     );
-    if (!realtimeActive) return historyIntervalMs;
+    const state = this._normalizeRealtimeState(realtimeState);
+    if (!state.realtimeActive) return historyIntervalMs;
+
+    if (!state.frontendActive && state.resourceAlertActive) {
+      return Math.max(historyIntervalMs, RESOURCE_ALERT_AGENT_REPORT_INTERVAL_MS);
+    }
 
     const seconds = Math.max(1, Math.ceil((historyIntervalMs / 1000) / AGENT_REALTIME_REPORT_DIVISOR));
     return seconds * 1000;
@@ -899,6 +1000,12 @@ export class MetricsBroadcaster {
     const serverId = String(payload.serverId || '');
     const now = Date.now();
     const state = this.agentHistoryWrites.get(serverId) || {};
+    const currentAggregate = payload.historyAggregate ||
+      collectHistoryMetricAggregates([{ metrics: payload.metrics }]);
+    state.pendingHistoryAggregate = mergeHistoryMetricAggregates(
+      state.pendingHistoryAggregate,
+      currentAggregate
+    );
     const intervalMs = Math.max(
       1000,
       Number(payload.reportIntervalMs) ||
@@ -924,11 +1031,12 @@ export class MetricsBroadcaster {
     state.flushing = true;
     this.agentHistoryWrites.set(serverId, state);
     try {
+      const metrics = applyHistoryMetricAggregates(payload.metrics, state.pendingHistoryAggregate);
       await saveMetricsHistory(
         this.env.DB,
         serverId,
         payload.historyPartitionId,
-        payload.metrics,
+        metrics,
         payload.regionCode,
         payload.timestamp,
         payload.agentVersion
@@ -940,6 +1048,7 @@ export class MetricsBroadcaster {
         ...currentAttachment,
         lastD1WriteTs: persistedAt
       });
+      delete state.pendingHistoryAggregate;
       return {
         persisted: true,
         nextD1WriteAfterMs: intervalMs
@@ -992,6 +1101,7 @@ export class MetricsBroadcaster {
 
     const latestSample = samples[samples.length - 1];
     const latestMetrics = getReportMetrics(data, latestSample);
+    const historyAggregate = collectHistoryMetricAggregates(samples);
     const broadcastSamples = toBroadcastSamples(
       context.serverId,
       samples,
@@ -1004,8 +1114,8 @@ export class MetricsBroadcaster {
       serverId: context.serverId,
       samples: broadcastSamples
     }];
-    const realtimeActive = this._hasAgentRealtimeConsumers(reportTs);
-    if (realtimeActive) {
+    const realtimeState = this._getAgentRealtimeState(reportTs);
+    if (realtimeState.realtimeActive) {
       await this._ingestRealtimeUpdates(normalizedUpdates, reportTs);
     } else {
       this._cacheLatestReportUpdates(normalizedUpdates, reportTs);
@@ -1015,6 +1125,7 @@ export class MetricsBroadcaster {
       serverId: context.serverId,
       historyPartitionId: context.historyPartitionId,
       metrics: latestMetrics,
+      historyAggregate,
       regionCode: context.regionCode,
       timestamp: latestSample.ts,
       agentVersion: context.agentVersion,
@@ -1022,7 +1133,7 @@ export class MetricsBroadcaster {
     });
 
     const configAck = await this._buildAgentConfigAck(context);
-    const nextWssReportAfterMs = this._getAgentNextWssReportAfterMs(context.reportIntervalMs, realtimeActive);
+    const nextWssReportAfterMs = this._getAgentNextWssReportAfterMs(context.reportIntervalMs, realtimeState);
     this._sendWsJson(ws, {
       type: 'ack',
       ts: Date.now(),
@@ -1299,9 +1410,9 @@ export class MetricsBroadcaster {
         });
       }
 
-      const normalizedServerIds = this._normalizeServerIds(body?.serverIds);
-      if (!normalizedServerIds.ok) {
-        return new Response(JSON.stringify({ error: 'invalid serverIds' }), {
+      const normalizedRules = this._normalizeResourceAlertEvaluationRules(body?.rules);
+      if (!normalizedRules.ok) {
+        return new Response(JSON.stringify({ error: 'invalid rules' }), {
           status: 400,
           headers: { 'Content-Type': 'application/json' }
         });
@@ -1309,10 +1420,7 @@ export class MetricsBroadcaster {
 
       this._activateResourceAlertCache();
       await this._ensureResourceAlertSnapshotLoaded();
-      const result = await this._evaluateResourceAlerts({
-        ...body,
-        serverIds: normalizedServerIds.ids
-      });
+      const result = await this._evaluateResourceAlertRules(normalizedRules.rules);
 
       return new Response(JSON.stringify(result), {
         headers: {
@@ -1710,17 +1818,14 @@ export class MetricsBroadcaster {
     }
   }
 
-  async _evaluateResourceAlerts(body = {}) {
-    const now = Date.now();
-    this._pruneResourceAlertWindows(now);
-
-    const windowMinutesNumber = Number(body.windowMinutes);
+  _evaluateResourceAlertRule(rule = {}, now = Date.now()) {
+    const windowMinutesNumber = Number(rule.windowMinutes);
     const windowMinutes = Number.isInteger(windowMinutesNumber)
       ? Math.max(5, Math.min(10, windowMinutesNumber))
       : 5;
     const cutoffMinute = getAlertCutoffMinute(now, windowMinutes);
-    const mode = normalizeResourceAlertMode(body.mode);
-    const thresholds = normalizeThresholds(body.thresholds);
+    const mode = normalizeResourceAlertMode(rule.mode);
+    const thresholds = normalizeThresholds(rule.thresholds);
     const metricThresholds = [
       ['cpu', thresholds.cpu],
       ['ram', thresholds.ram],
@@ -1734,11 +1839,10 @@ export class MetricsBroadcaster {
     const evaluatedServerIds = [];
     const evaluations = [];
     if (metricThresholds.length === 0) {
-      await this._persistResourceAlertSnapshotIfNeeded(now);
-      return { now, mode, windowMinutes, alerts, evaluatedServerIds, evaluations };
+      return { ruleId: rule.ruleId, now, mode, windowMinutes, alerts, evaluatedServerIds, evaluations };
     }
 
-    for (const serverId of body.serverIds || []) {
+    for (const serverId of rule.serverIds || []) {
       const samples = (this.resourceAlertWindows.get(serverId)?.samples || [])
         .filter(sample => sample && Number(sample.minuteTs) >= cutoffMinute)
         .sort((a, b) => a.minuteTs - b.minuteTs);
@@ -1808,8 +1912,20 @@ export class MetricsBroadcaster {
       }
     }
 
+    return { ruleId: rule.ruleId, now, mode, windowMinutes, alerts, evaluatedServerIds, evaluations };
+  }
+
+  async _evaluateResourceAlertRules(rules = []) {
+    const now = Date.now();
+    this._pruneResourceAlertWindows(now);
+    const results = [];
+
+    for (const rule of rules) {
+      results.push(this._evaluateResourceAlertRule(rule, now));
+    }
+
     await this._persistResourceAlertSnapshotIfNeeded(now);
-    return { now, mode, windowMinutes, alerts, evaluatedServerIds, evaluations };
+    return { now, results };
   }
 
   // WebSocket 收到消息（ping 已被自动响应拦截，不会到达此处）

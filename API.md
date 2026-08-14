@@ -394,7 +394,7 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
   ```json
   { "type": "ack", "ts": 1737638343000, "persisted": true, "nextD1WriteAfterMs": 60000, "nextWssReportAfterMs": 60000 }
   ```
-  `persisted` 表示本条消息是否触发 D1 历史写入；`nextD1WriteAfterMs` 是距离下一次允许写入 D1 的最短等待时间。WSS 首条成功指标会立即写入一次 D1，后续按该服务器 `report_interval` 控制写入频率（允许值沿用配置：`30/60/120/180` 秒；异常回退 `60` 秒）。`nextWssReportAfterMs` 是服务端建议的下一次 WSS 上报间隔：有前端实时订阅或资源告警缓存活跃时约为 `report_interval / 20`，无实时消费者时回退到 `report_interval`，用于降低 idle 状态 DO WebSocket 消息数。
+  `persisted` 表示本条消息是否触发 D1 历史写入；`nextD1WriteAfterMs` 是距离下一次允许写入 D1 的最短等待时间。WSS 首条成功指标会立即写入一次 D1，后续按该服务器 `report_interval` 控制写入频率（允许值沿用配置：`30/60/120/180` 秒；异常回退 `60` 秒）。`nextWssReportAfterMs` 是服务端建议的下一次 WSS 上报间隔：有前端实时订阅时约为 `report_interval / 15`；仅资源告警缓存活跃且无前端订阅时至少 `60` 秒；无实时消费者时回退到 `report_interval`，用于降低 idle 状态 DO WebSocket 消息数。
   新版 WSS Agent 可在握手 URL query 中携带 `config_schema=3` / `config_md5=<md5>`，也兼容握手 Header `X-Agent-Config-Schema: 3` 与 `X-Agent-Config-Md5` 记录当前配置状态；当某次上报消息携带 `config_schema: 3` / `config_md5` 时，ack 会同时返回动态配置协商字段：
   ```json
   {

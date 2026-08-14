@@ -298,7 +298,7 @@ Configure notifications in Admin -> Global Settings -> Notifications. The platfo
 | DingTalk | Custom robot Webhook URL | Empty |
 | OneBot / QQ | `onebot:http://host/send_private_msg?...` or `send_group_msg` | User ID or group ID |
 | Bark | `https://api.day.app/xxxx/` or `bark:https://example.com/xxxx/` | Empty |
-| ServerChan | `https://sctapi.ftqq.com/<SendKey>.send` | Empty |
+| ServerChan | `https://sctapi.ftqq.com/<SendKey>.send` or `server:https://example.com/s/<SendKey>.send` | Empty |
 | WxPusher | `https://wxpusher.zjiecode.com/api/send/message/[SPT_xxx]/Hello` | Empty |
 | Gotify | `https://gotify.example.com/message?token=xxx` | Empty |
 
