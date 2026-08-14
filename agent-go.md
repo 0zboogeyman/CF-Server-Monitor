@@ -293,6 +293,8 @@ Agent 会按 `REPORT_INTERVAL` 向 `WORKER_URL` 发起 `POST` 请求，`Content-
 | `samples` | array | 可选，仅 `COLLECT_INTERVAL > 0` 时存在 |
 | `collect_interval` | number | 高频采样间隔，单位秒；`0` 表示不启用高频采样 |
 | `report_interval` | number | 上报间隔，单位秒 |
+| `config_schema` | string | 动态配置协议版本，当前为 `3`；WSS 首次上报、约每 60 秒或 MD5 变化时携带 |
+| `config_md5` | string | 本地保存的远端配置 MD5；首次或为空时为 `none`，携带频率同 `config_schema` |
 
 `time` 字段：
 

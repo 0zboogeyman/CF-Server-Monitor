@@ -38,6 +38,7 @@ const AGENT_REPORT_KIND = 'agent-report';
 const DEFAULT_AGENT_HISTORY_WRITE_INTERVAL_MS = 60 * 1000;
 const ALLOWED_AGENT_REPORT_INTERVALS = new Set([30, 60, 120, 180]);
 const AGENT_SERVER_DETAIL_TTL_MS = 120 * 1000;
+const AGENT_REALTIME_REPORT_DIVISOR = 20;
 const LATEST_REPORT_TTL_MS = 5 * 60 * 1000;
 const MAX_LATEST_REPORT_SERVERS = 1000;
 const RESOURCE_ALERT_STORAGE_KEY = 'resource_alert_windows_v1';
@@ -575,22 +576,23 @@ export class MetricsBroadcaster {
   }
 
   _getAgentConfigState(data = {}, attachment = {}) {
-    const schema = normalizeConfigSchema(firstDefined(
+    const reportedSchema = firstDefined(
       data.config_schema,
       data.configSchema,
       data.agent_config_schema,
       data.agentConfigSchema,
-      data.schema_version,
-      attachment.configSchema
-    ));
-    const md5 = normalizeConfigMd5(firstDefined(
+      data.schema_version
+    );
+    const reportedMd5 = firstDefined(
       data.config_md5,
       data.configMd5,
       data.agent_config_md5,
-      data.agentConfigMd5,
-      attachment.configMd5
-    ));
-    return { schema, md5 };
+      data.agentConfigMd5
+    );
+    const requested = reportedSchema !== undefined || reportedMd5 !== undefined;
+    const schema = normalizeConfigSchema(firstDefined(reportedSchema, attachment.configSchema));
+    const md5 = normalizeConfigMd5(firstDefined(reportedMd5, attachment.configMd5));
+    return { schema, md5, requested };
   }
 
   _isCorrectionAck(data) {
@@ -600,10 +602,18 @@ export class MetricsBroadcaster {
     );
   }
 
-  _getReportIntervalMs(serverDetail) {
-    const reportInterval = Number(serverDetail?.report_interval);
+  _normalizeAgentReportIntervalMs(value) {
+    const reportInterval = Number(value);
     if (Number.isInteger(reportInterval) && ALLOWED_AGENT_REPORT_INTERVALS.has(reportInterval)) {
       return reportInterval * 1000;
+    }
+    return null;
+  }
+
+  _getReportIntervalMs(serverDetail) {
+    const reportIntervalMs = this._normalizeAgentReportIntervalMs(serverDetail?.report_interval);
+    if (reportIntervalMs) {
+      return reportIntervalMs;
     }
     return DEFAULT_AGENT_HISTORY_WRITE_INTERVAL_MS;
   }
@@ -669,10 +679,15 @@ export class MetricsBroadcaster {
       attachment.agentVersion
     );
     const agentConfig = this._getAgentConfigState(data, attachment);
+    const reportedReportIntervalMs = this._normalizeAgentReportIntervalMs(firstDefined(
+      data.report_interval,
+      data.reportInterval
+    ));
     const attachedReportIntervalMs = Number(attachment.reportIntervalMs);
-    const reportIntervalMs = attachment.authenticated && Number.isFinite(attachedReportIntervalMs) && attachedReportIntervalMs > 0
-      ? attachedReportIntervalMs
-      : this._getReportIntervalMs(serverDetail);
+    const reportIntervalMs = reportedReportIntervalMs ||
+      (attachment.authenticated && Number.isFinite(attachedReportIntervalMs) && attachedReportIntervalMs > 0
+        ? attachedReportIntervalMs
+        : this._getReportIntervalMs(serverDetail));
     const nextAttachment = {
       ...attachment,
       kind: AGENT_REPORT_KIND,
@@ -697,22 +712,28 @@ export class MetricsBroadcaster {
     };
   }
 
+  async _loadAgentConfigDescriptor(serverId) {
+    const [serverDetail, settings] = await Promise.all([
+      this._getAgentServerDetail(serverId),
+      loadSiteSettings(this.env.DB)
+    ]);
+    if (!serverDetail) return null;
+    return describeAgentConfig(serverDetail, settings);
+  }
+
   async _buildAgentConfigAck(context) {
-    if (!context || context.agentConfig?.schema !== String(AGENT_CONFIG_SCHEMA_VERSION)) {
+    if (!context || !context.agentConfig?.requested || context.agentConfig?.schema !== String(AGENT_CONFIG_SCHEMA_VERSION)) {
       return null;
     }
 
+    const clientMd5 = normalizeConfigMd5(context.agentConfig.md5);
     try {
-      const [serverDetail, settings] = await Promise.all([
-        this._getAgentServerDetail(context.serverId),
-        loadSiteSettings(this.env.DB)
-      ]);
-      if (!serverDetail) return null;
+      const descriptor = await this._loadAgentConfigDescriptor(context.serverId);
+      if (!descriptor) return null;
 
-      const descriptor = await describeAgentConfig(serverDetail, settings);
       const configBody = descriptor.serialized + serializeCorrection(descriptor.correction);
       const hasCorrection = descriptor.correction !== null;
-      const md5Changed = context.agentConfig.md5 !== descriptor.md5;
+      const md5Changed = clientMd5 !== descriptor.md5;
       const config = {
         ...descriptor.config,
         config_md5: descriptor.md5
@@ -770,6 +791,21 @@ export class MetricsBroadcaster {
     await this._cacheLatencyWindowSamples(normalizedUpdates, reportTs);
     this._cacheLatestReportUpdates(normalizedUpdates, reportTs);
     this._broadcastBatch(normalizedUpdates, reportTs);
+  }
+
+  _hasAgentRealtimeConsumers(now = Date.now()) {
+    return this._getFrontendSubscriberCount() > 0 || this._shouldCacheResourceAlertSamples(now);
+  }
+
+  _getAgentNextWssReportAfterMs(reportIntervalMs, realtimeActive) {
+    const historyIntervalMs = Math.max(
+      1000,
+      Number(reportIntervalMs) || DEFAULT_AGENT_HISTORY_WRITE_INTERVAL_MS
+    );
+    if (!realtimeActive) return historyIntervalMs;
+
+    const seconds = Math.max(1, Math.ceil((historyIntervalMs / 1000) / AGENT_REALTIME_REPORT_DIVISOR));
+    return seconds * 1000;
   }
 
   async _persistAgentHistoryIfDue(ws, attachment, payload) {
@@ -877,10 +913,16 @@ export class MetricsBroadcaster {
       latestMetrics
     );
     const reportTs = Date.now();
-    await this._ingestRealtimeUpdates([{
+    const normalizedUpdates = [{
       serverId: context.serverId,
       samples: broadcastSamples
-    }], reportTs);
+    }];
+    const realtimeActive = this._hasAgentRealtimeConsumers(reportTs);
+    if (realtimeActive) {
+      await this._ingestRealtimeUpdates(normalizedUpdates, reportTs);
+    } else {
+      this._cacheLatestReportUpdates(normalizedUpdates, reportTs);
+    }
 
     const persisted = await this._persistAgentHistoryIfDue(ws, context.attachment, {
       serverId: context.serverId,
@@ -893,11 +935,13 @@ export class MetricsBroadcaster {
     });
 
     const configAck = await this._buildAgentConfigAck(context);
+    const nextWssReportAfterMs = this._getAgentNextWssReportAfterMs(context.reportIntervalMs, realtimeActive);
     this._sendWsJson(ws, {
       type: 'ack',
       ts: Date.now(),
       persisted: persisted.persisted,
       nextD1WriteAfterMs: persisted.nextD1WriteAfterMs,
+      nextWssReportAfterMs,
       ...(configAck || {})
     });
   }

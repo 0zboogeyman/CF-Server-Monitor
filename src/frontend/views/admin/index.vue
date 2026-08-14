@@ -343,7 +343,7 @@
                 </div>
                 <div class="quota-progress-item">
                   <div class="flex-justify-between text-sm mb-1">
-                    <span>{{ trans.durableObjectsRequests }}：{{ formatNumber(d1UsageResult.usage.today.durableObjectsRequests) }} / {{ formatNumber(100000) }}</span>
+                    <span>{{ trans.durableObjectsRequests }}：{{ formatNumber(d1UsageResult.usage.today.durableObjectsRequests) }}{{ formatDurableObjectsRawRequests(d1UsageResult.usage.today) }} / {{ formatNumber(100000) }}</span>
                     <span>{{ getUsagePercent(d1UsageResult.usage.today.durableObjectsRequests, 100000) }}%</span>
                   </div>
                   <div class="quota-progress-bar">
@@ -394,7 +394,7 @@
                 </div>
                 <div class="quota-progress-item">
                   <div class="flex-justify-between text-sm mb-1">
-                    <span>{{ trans.durableObjectsRequests }}：{{ formatNumber(d1UsageResult.usage.yesterday.durableObjectsRequests) }} / {{ formatNumber(100000) }}</span>
+                    <span>{{ trans.durableObjectsRequests }}：{{ formatNumber(d1UsageResult.usage.yesterday.durableObjectsRequests) }}{{ formatDurableObjectsRawRequests(d1UsageResult.usage.yesterday) }} / {{ formatNumber(100000) }}</span>
                     <span>{{ getUsagePercent(d1UsageResult.usage.yesterday.durableObjectsRequests, 100000) }}%</span>
                   </div>
                   <div class="quota-progress-bar">
@@ -701,6 +701,12 @@ const parseThemeOptions = (value) => {
 const formatNumber = (value, maximumFractionDigits = 0) => (
   Number(value || 0).toLocaleString(undefined, { maximumFractionDigits })
 )
+const formatDurableObjectsRawRequests = (usage = {}) => {
+  const raw = Number(usage.durableObjectsRawRequests || 0)
+  const estimated = Number(usage.durableObjectsRequests || 0)
+  if (!raw || raw === estimated) return ''
+  return ` (${trans.value.rawRequests || 'raw'}: ${formatNumber(raw)})`
+}
 const getUsagePercent = (used, limit) => {
   if (!limit) return 0
   return Math.min(100, Number(((Number(used || 0) / Number(limit)) * 100).toFixed(2)))
