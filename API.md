@@ -965,8 +965,8 @@ https://raw.githubusercontent.com/huilang-me/CFSM-Theme-Store/refs/heads/main/th
 | `/`、`/#/`、`/#/server/:id` 等前台路径 | `theme_url` 为空时返回内置主题；配置第三方主题时返回反代后的主题 `index.html` |
 | `/admin` | 始终返回内置默认主题的管理后台入口 |
 | `/admin/` | `302` 跳转到 `/admin#admin` |
-| `/assets/*` | 配置或预览第三方主题时反代对应主题 `assets/`；从 `/admin` 引用时优先返回内置静态资源 |
-| 其他静态路径 | 不走主题反代，仍由项目原有 ASSETS 或 public 文件处理 |
+| `/assets/*` | 配置或预览第三方主题时反代对应主题 `assets/`；未配置主题时返回 404 |
+| 其他静态路径 | 不走主题反代，由 Workers Static Assets 直接处理，缓存头以 `public/_headers` 为准 |
 
 **主题 URL 规则**：
 

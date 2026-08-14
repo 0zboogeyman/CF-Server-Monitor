@@ -20,48 +20,6 @@ import { MetricsBroadcaster as _MetricsBroadcaster }
 
 export class MetricsBroadcaster extends _MetricsBroadcaster {}
 
-async function fetchStaticAsset(request, env, path) {
-  if (!env.ASSETS || request.method !== 'GET') return null;
-
-  try {
-    const res = await env.ASSETS.fetch(
-      new Request(`http://static${path}`, request)
-    );
-
-    if (!res.ok) return null;
-
-    const headers = new Headers(res.headers);
-
-    headers.set(
-      'Cache-Control',
-      'public, max-age=31536000, immutable'
-    );
-
-    return new Response(res.body, {
-      status: res.status,
-      statusText: res.statusText,
-      headers
-    });
-
-  } catch (_) {
-    return null;
-  }
-}
-
-function isAdminAssetReferrer(request) {
-  const referrer = request.headers.get('Referer') || request.headers.get('Referrer') || '';
-  if (!referrer) return false;
-
-  try {
-    const requestUrl = new URL(request.url);
-    const referrerUrl = new URL(referrer);
-    return referrerUrl.origin === requestUrl.origin &&
-      (referrerUrl.pathname === '/admin' || referrerUrl.pathname.startsWith('/admin/'));
-  } catch (_) {
-    return false;
-  }
-}
-
 function cleanThemeAssetResponse(response) {
   const headers = new Headers(response.headers);
   headers.delete('X-CFSM-Theme-Asset');
@@ -228,26 +186,12 @@ export default {
     }
 
     if (method === 'GET' && path.startsWith('/assets/')) {
-      if (isAdminAssetReferrer(request)) {
-        const staticAssetResponse = await fetchStaticAsset(request, env, path);
-        if (staticAssetResponse) {
-          return applyCors(staticAssetResponse, request, corsAllowedOrigins);
-        }
-      }
-
       try {
         const themeAssetResponse = await serveFrontend(request, env, await loadSettings(env.DB));
         if (themeAssetResponse.headers.get('X-CFSM-Theme-Asset') === '1') {
           return applyCors(cleanThemeAssetResponse(themeAssetResponse), request, corsAllowedOrigins);
         }
       } catch (e) {
-      }
-    }
-
-    if (env.ASSETS && method === 'GET') {
-      const staticAssetResponse = await fetchStaticAsset(request, env, path);
-      if (staticAssetResponse) {
-        return applyCors(staticAssetResponse, request, corsAllowedOrigins);
       }
     }
 
