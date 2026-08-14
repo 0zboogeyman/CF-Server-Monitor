@@ -14,6 +14,14 @@
 import { saveMetricsHistory } from '../database/schema.js';
 import { ensureServerOptimization } from '../database/indexOptimization.js';
 import { getServerDetail, clearServerDetailCache } from '../utils/cache.js';
+import { loadSiteSettings } from '../utils/settings.js';
+import {
+  AGENT_CONFIG_MD5_HEADER,
+  AGENT_CONFIG_SCHEMA_HEADER,
+  AGENT_CONFIG_SCHEMA_VERSION,
+  describeAgentConfig,
+  serializeCorrection
+} from '../utils/agentConfig.js';
 import {
   getReportMetrics,
   normalizeAgentVersion,
@@ -80,6 +88,25 @@ function normalizeMetricTimestamp(value, fallback = Date.now()) {
 function toPublicIpReachability(value) {
   const normalized = String(value ?? '').trim().toLowerCase();
   return normalized && normalized !== '0' && normalized !== 'false' ? '1' : '0';
+}
+
+function normalizeConfigSchema(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return '';
+  const number = Number(raw);
+  return Number.isInteger(number) && number > 0 ? String(number) : raw;
+}
+
+function normalizeConfigMd5(value) {
+  const raw = String(value ?? '').trim().toLowerCase();
+  return raw || 'none';
+}
+
+function firstDefined(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  return undefined;
 }
 
 function maskPublicIpFields(data) {
@@ -521,13 +548,49 @@ export class MetricsBroadcaster {
   _normalizeAgentReportData(message) {
     if (!message || typeof message !== 'object' || Array.isArray(message)) return null;
     if (message.type === 'update' && message.payload && typeof message.payload === 'object' && !Array.isArray(message.payload)) {
+      const payload = { ...message.payload };
+      const inheritedFields = [
+        'config_md5',
+        'configMd5',
+        'agent_config_md5',
+        'agentConfigMd5',
+        'config_schema',
+        'configSchema',
+        'agent_config_schema',
+        'agentConfigSchema',
+        'schema_version'
+      ];
+      for (const field of inheritedFields) {
+        if (payload[field] === undefined && message[field] !== undefined) {
+          payload[field] = message[field];
+        }
+      }
       return {
-        ...message.payload,
-        id: message.id ?? message.payload.id,
-        secret: message.secret ?? message.payload.secret
+        ...payload,
+        id: message.id ?? payload.id,
+        secret: message.secret ?? payload.secret
       };
     }
     return message;
+  }
+
+  _getAgentConfigState(data = {}, attachment = {}) {
+    const schema = normalizeConfigSchema(firstDefined(
+      data.config_schema,
+      data.configSchema,
+      data.agent_config_schema,
+      data.agentConfigSchema,
+      data.schema_version,
+      attachment.configSchema
+    ));
+    const md5 = normalizeConfigMd5(firstDefined(
+      data.config_md5,
+      data.configMd5,
+      data.agent_config_md5,
+      data.agentConfigMd5,
+      attachment.configMd5
+    ));
+    return { schema, md5 };
   }
 
   _isCorrectionAck(data) {
@@ -605,6 +668,7 @@ export class MetricsBroadcaster {
       data.metrics?.agent_version ??
       attachment.agentVersion
     );
+    const agentConfig = this._getAgentConfigState(data, attachment);
     const attachedReportIntervalMs = Number(attachment.reportIntervalMs);
     const reportIntervalMs = attachment.authenticated && Number.isFinite(attachedReportIntervalMs) && attachedReportIntervalMs > 0
       ? attachedReportIntervalMs
@@ -616,7 +680,9 @@ export class MetricsBroadcaster {
       serverId,
       historyPartitionId: serverDetail.history_partition_id,
       agentVersion,
-      reportIntervalMs
+      reportIntervalMs,
+      configSchema: agentConfig.schema,
+      configMd5: agentConfig.md5
     };
     ws.serializeAttachment(nextAttachment);
 
@@ -626,8 +692,53 @@ export class MetricsBroadcaster {
       historyPartitionId: serverDetail.history_partition_id,
       regionCode: attachment.region || '',
       agentVersion,
-      reportIntervalMs
+      reportIntervalMs,
+      agentConfig
     };
+  }
+
+  async _buildAgentConfigAck(context) {
+    if (!context || context.agentConfig?.schema !== String(AGENT_CONFIG_SCHEMA_VERSION)) {
+      return null;
+    }
+
+    try {
+      const [serverDetail, settings] = await Promise.all([
+        this._getAgentServerDetail(context.serverId),
+        loadSiteSettings(this.env.DB)
+      ]);
+      if (!serverDetail) return null;
+
+      const descriptor = await describeAgentConfig(serverDetail, settings);
+      const configBody = descriptor.serialized + serializeCorrection(descriptor.correction);
+      const hasCorrection = descriptor.correction !== null;
+      const md5Changed = context.agentConfig.md5 !== descriptor.md5;
+      const config = {
+        ...descriptor.config,
+        config_md5: descriptor.md5
+      };
+
+      if (hasCorrection) {
+        config.rx_correction = descriptor.correction.rx_correction;
+        config.tx_correction = descriptor.correction.tx_correction;
+      }
+
+      const ack = {
+        config_schema: AGENT_CONFIG_SCHEMA_VERSION,
+        config_md5: descriptor.md5,
+        has_config: md5Changed || hasCorrection
+      };
+
+      if (ack.has_config) {
+        ack.config_body = configBody;
+        ack.config = config;
+      }
+
+      return ack;
+    } catch (e) {
+      console.warn('[update-ws] Failed to build agent configuration:', e?.message || e);
+      return null;
+    }
   }
 
   async _ackTrafficCorrection(serverId, data) {
@@ -781,11 +892,13 @@ export class MetricsBroadcaster {
       reportIntervalMs: context.reportIntervalMs
     });
 
+    const configAck = await this._buildAgentConfigAck(context);
     this._sendWsJson(ws, {
       type: 'ack',
       ts: Date.now(),
       persisted: persisted.persisted,
-      nextD1WriteAfterMs: persisted.nextD1WriteAfterMs
+      nextD1WriteAfterMs: persisted.nextD1WriteAfterMs,
+      ...(configAck || {})
     });
   }
 
@@ -813,7 +926,9 @@ export class MetricsBroadcaster {
       region: request.headers.get('cf-ipcountry') || '',
       agentVersion: normalizeAgentVersion(request.headers.get('X-Agent-Version')),
       reportIntervalMs: DEFAULT_AGENT_HISTORY_WRITE_INTERVAL_MS,
-      lastD1WriteTs: 0
+      lastD1WriteTs: 0,
+      configSchema: normalizeConfigSchema(request.headers.get(AGENT_CONFIG_SCHEMA_HEADER)),
+      configMd5: normalizeConfigMd5(request.headers.get(AGENT_CONFIG_MD5_HEADER))
     });
 
     this._sendWsJson(server, {
