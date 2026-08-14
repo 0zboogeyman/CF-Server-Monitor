@@ -42,7 +42,7 @@ function normalizeTimestamp(value, fallback = Date.now()) {
   return ts < 10000000000 ? ts * 1000 : ts;
 }
 
-function normalizeAgentVersion(value) {
+export function normalizeAgentVersion(value) {
   if (value === null || value === undefined) return '';
   return String(value)
     .trim()
@@ -54,12 +54,12 @@ function logUpdateBadRequest(reason, details = {}) {
   console.warn('[Update] 400 Bad Request:', reason, details);
 }
 
-function normalizeCorrectionValue(value) {
+export function normalizeCorrectionValue(value) {
   if (value === null || value === undefined || value === '') return 0;
   return isValidTrafficCorrection(value) ? Number(value) : null;
 }
 
-function normalizeMetricSamples(data) {
+export function normalizeMetricSamples(data) {
   const now = Date.now();
   const rawSamples = Array.isArray(data.samples)
     ? data.samples
@@ -84,7 +84,7 @@ function normalizeMetricSamples(data) {
   return samples.slice(-MAX_BATCH_SAMPLES);
 }
 
-function getReportMetrics(data, latestSample) {
+export function getReportMetrics(data, latestSample) {
   const reportMetrics = data?.metrics && typeof data.metrics === 'object' ? data.metrics : null;
   if (!reportMetrics) return latestSample?.metrics || {};
   return {
@@ -101,7 +101,7 @@ function buildSamplePayloadForBroadcast(metrics = {}, timestamp = Date.now()) {
   return coerceNumericMetricFields(payload);
 }
 
-function toBroadcastSamples(id, samples, regionCode, agentVersion = '', reportMetrics = null) {
+export function toBroadcastSamples(id, samples, regionCode, agentVersion = '', reportMetrics = null) {
   const lastIndex = samples.length - 1;
   return samples.map((sample, index) => {
     const metrics = reportMetrics && typeof reportMetrics === 'object' && index === lastIndex
@@ -310,12 +310,21 @@ export async function handleUpdate(request, env, ctx) {
 }
 
 // 暴露给 index.js 路由使用的 WebSocket 接入函数
-export async function handleWebSocketUpgrade(request, env) {
+function isWebSocketUpgradeRequest(request) {
+  const upgradeHeader = request.headers.get('Upgrade');
+  return !!upgradeHeader && upgradeHeader.toLowerCase() === 'websocket';
+}
+
+async function forwardWebSocketUpgrade(request, env, internalPath, logPrefix) {
   if (!env || !env.METRICS_BROADCASTER) {
     return new Response(JSON.stringify({ error: 'WebSocket not enabled', code: 503 }), {
       status: 503,
       headers: { 'Content-Type': 'application/json' }
     });
+  }
+
+  if (!isWebSocketUpgradeRequest(request)) {
+    return new Response('Expected WebSocket upgrade request', { status: 426 });
   }
 
   const url = new URL(request.url);
@@ -326,17 +335,28 @@ export async function handleWebSocketUpgrade(request, env) {
     const realOrigin = new URL(request.url).origin;
     const headers = new Headers(request.headers);
     headers.set('X-Real-Origin', realOrigin);
-    return await stub.fetch(new Request(`http://internal/ws${qs}`, {
+    if (request.cf?.country && !headers.get('cf-ipcountry')) {
+      headers.set('cf-ipcountry', request.cf.country);
+    }
+    return await stub.fetch(new Request(`http://internal${internalPath}${qs}`, {
       method: request.method,
       headers,
       body: request.body,
       redirect: request.redirect
     }));
   } catch (e) {
-    console.error('[ws] DO upgrade failed:', e);
+    console.error(`${logPrefix} DO upgrade failed:`, e);
     return new Response(JSON.stringify({ error: 'WebSocket error', code: 500 }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' }
     });
   }
+}
+
+export async function handleWebSocketUpgrade(request, env) {
+  return forwardWebSocketUpgrade(request, env, '/ws', '[ws]');
+}
+
+export async function handleUpdateWebSocketUpgrade(request, env) {
+  return forwardWebSocketUpgrade(request, env, '/update', '[update-ws]');
 }

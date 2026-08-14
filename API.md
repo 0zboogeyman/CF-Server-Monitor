@@ -217,6 +217,7 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
 **Request**
 
 - Method：`POST`
+- WebSocket：`GET /update` + `Upgrade: websocket`，公网 URL 形如 `wss://status.example.com/update`
 - Path：`/update`
 - Headers：
   ```
@@ -226,6 +227,27 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
   X-Agent-Config-Md5: <最后成功应用的配置 MD5，首次为 none>
   ```
   动态配置请求头为新版探针使用的可选字段；未携带时保持旧版响应协议。
+
+  WebSocket 握手只能使用 `GET + Upgrade`，这是 WebSocket 协议限制；后端仍通过同一个 `/update` 路径区分 `POST` 与 `wss`。握手成功后服务端先发送：
+
+  ```json
+  { "type": "hello", "ts": 1737638340000, "protocol": "update" }
+  ```
+
+  WebSocket 上报消息兼容下方 POST JSON body，也支持包一层 `type: "update"`：
+
+  ```json
+  {
+    "type": "update",
+    "id": "9b2c4d3e-1a2b-4c5d-9e8f-7a6b5c4d3e2f",
+    "secret": "<API_SECRET>",
+    "payload": {
+      "metrics": { "...": "metrics" }
+    }
+  }
+  ```
+
+  第一条有效上报必须携带 `id` 与 `secret`。连接认证成功后，后续消息可以省略 `id` 与 `secret`；如果后续消息显式携带不同 `id` 或错误 `secret`，服务端会发送错误帧并关闭连接。
 - Body（JSON）：
   ```json
   {
@@ -361,9 +383,51 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
   { "error": "Server not found", "code": 404 }
   ```
 
+**WebSocket 上报响应 / 错误**
+
+- 握手失败：
+  - `503 { "error": "WebSocket not enabled", "code": 503 }`：未绑定 `METRICS_BROADCASTER` Durable Object
+  - `426 Expected WebSocket upgrade request`：`GET /update` 未携带 `Upgrade: websocket`
+  - `403 Forbidden`：设置了 WebSocket `Origin`，且不在 `CORS_ALLOWED_ORIGINS` 中
+  - `500 { "error": "WebSocket error", "code": 500 }`：Worker 转发至 DO 失败
+- 上报成功：服务端发送 ack，不关闭连接。
+  ```json
+  { "type": "ack", "ts": 1737638343000, "persisted": true, "nextD1WriteAfterMs": 60000 }
+  ```
+  `persisted` 表示本条消息是否触发 D1 历史写入；`nextD1WriteAfterMs` 是距离下一次允许写入 D1 的最短等待时间。WSS 首条成功指标会立即写入一次 D1，后续按该服务器 `report_interval` 控制写入频率（允许值沿用配置：`30/60/120/180` 秒；异常回退 `60` 秒）。实时推送不受 D1 写入节流影响。
+- 流量修正确认成功：
+  ```json
+  { "type": "ack", "ts": 1737638343000, "correction": true }
+  ```
+- 上报失败：服务端先发送错误帧，然后使用 close code `1008` 关闭 WebSocket；close reason 与 `error` 一致。
+  ```json
+  { "type": "error", "ts": 1737638343000, "error": "Invalid secret", "code": 401 }
+  ```
+  常见错误：
+
+  | code | error | 是否查询 D1 | 说明 |
+  | ---- | ----- | ---------- | ---- |
+  | 400 | `Invalid JSON` | 否 | WebSocket 消息不是合法 JSON |
+  | 400 | `Invalid report payload` | 否 | 消息不是对象，或 `type:"update"` 的 `payload` 非对象 |
+  | 400 | `Invalid server ID` | 否 | `id` 为空、过长或包含非法字符 |
+  | 401 | `Invalid secret` | 否 | 第一条有效上报未携带正确 `secret`；认证后显式发送错误 `secret` 也会关闭连接 |
+  | 403 | `Server ID changed` | 否 | 已认证连接切换为另一个 `id` |
+  | 404 | `Server not found` | 是 | `id` 格式合法，但 `servers` 表不存在该服务器 |
+  | 400 | `Missing history_partition_id` | 是 | 服务器历史分区未初始化，且自动优化后仍不可用 |
+  | 400 | `Missing metrics` | 视认证状态而定 | 认证成功后没有有效 `metrics` / `samples` / `batch` |
+  | 400 | `Invalid correction` | 否 | `rx_correction` / `tx_correction` 格式非法 |
+
+> Agent 收到任意 `type:"error"` 或 close code `1008` 后，应停止当前 WSS 连接和 POST fallback 上报，至少等待 `120` 秒后再重新连接或重试 POST，避免认证/配置错误时持续消耗额度。
+
+**WebSocket 计费注意**
+
+- 建立 `wss://.../update` 连接需要一次 `GET + Upgrade`，该握手按一次 Workers request 计入。
+- 连接建立后的上报消息不再按 Workers request 逐条计入；它们作为 Durable Objects WebSocket incoming messages 计量，Cloudflare 计费口径按 `20:1` 折算为 DO requests。
+- 因此，Agent 应保持长连接；不要每次采样都断开重连。错误 `id` / `secret` 当前在 DO 消息阶段返回错误帧并关闭，避免每次上报都走 Worker 401。
+
 **副作用**
 
-1. `metrics_history` 只写入本次请求中最新的一个样本，避免 1 秒采集时放大 D1 写入次数。
+1. `POST /update` 的 `metrics_history` 只写入本次请求中最新的一个样本；`wss://.../update` 首条成功指标立即写入一次，后续按服务器 `report_interval` 最多写入一次 D1。
 2. 触发 Durable Object `MetricsBroadcaster` 内部广播，统一发送 `{type:"batchUpdate", ts, updates:[...]}` 格式，前端按样本时间逐个回放。
 3. 写入 `request.cf.country`（或 `cf-ipcountry` Header）作为该条记录的 `region` 字段。~~服务端会统一转大写。~~ **2026-07-26 修订**：当前按原值入库；Cloudflare 的国家代码通常为大写，但自定义回退 Header 不会被规范化。
 
@@ -1646,6 +1710,9 @@ UUID 缺失或格式非法时返回 `400 { "error": "invalidServerId", "code": 4
 | `ping`   | C → S | 精确文本 `{"type":"ping"}`                       |
 | `pong`   | S → C | 自动响应的精确文本 `{"type":"pong"}`，不带 `ts`   |
 | `batchUpdate` | S → C | `{ ts: number, updates: Array<{ serverId: string, samples: Array<{ ts: number, data: Partial<Server> }> }> }` |
+| `update` | C → S | `/update` WSS 上报可选包装格式：`{ type:"update", id:string, secret:string, payload:{ metrics?:object, samples?:array, batch?:array } }` |
+| `ack` | S → C | `/update` WSS 上报确认：`{ ts:number, persisted?:boolean, nextD1WriteAfterMs?:number, correction?:true }` |
+| `error` | S → C | `/update` WSS 上报错误：`{ ts:number, error:string, code:number }`；随后服务端通常以 close code `1008` 关闭连接 |
 
 客户端发来的 `pong` 会被静默忽略；它不是服务端定时发送的双向心跳协议。
 
