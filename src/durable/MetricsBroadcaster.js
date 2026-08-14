@@ -712,13 +712,29 @@ export class MetricsBroadcaster {
     };
   }
 
-  async _loadAgentConfigDescriptor(serverId) {
+  async _loadAgentConfigDescriptor(serverId, forceRefresh = false) {
     const [serverDetail, settings] = await Promise.all([
-      this._getAgentServerDetail(serverId),
+      this._getAgentServerDetail(serverId, forceRefresh),
       loadSiteSettings(this.env.DB)
     ]);
     if (!serverDetail) return null;
     return describeAgentConfig(serverDetail, settings);
+  }
+
+  _buildAgentConfigFrame(descriptor) {
+    const configBody = descriptor.serialized + serializeCorrection(descriptor.correction);
+    const hasCorrection = descriptor.correction !== null;
+    const configPayload = {
+      ...descriptor.config,
+      config_md5: descriptor.md5
+    };
+
+    if (hasCorrection) {
+      configPayload.rx_correction = descriptor.correction.rx_correction;
+      configPayload.tx_correction = descriptor.correction.tx_correction;
+    }
+
+    return { configBody, configPayload, hasCorrection };
   }
 
   async _buildAgentConfigAck(context) {
@@ -731,19 +747,8 @@ export class MetricsBroadcaster {
       const descriptor = await this._loadAgentConfigDescriptor(context.serverId);
       if (!descriptor) return null;
 
-      const configBody = descriptor.serialized + serializeCorrection(descriptor.correction);
-      const hasCorrection = descriptor.correction !== null;
+      const { configBody, configPayload, hasCorrection } = this._buildAgentConfigFrame(descriptor);
       const md5Changed = clientMd5 !== descriptor.md5;
-      const config = {
-        ...descriptor.config,
-        config_md5: descriptor.md5
-      };
-
-      if (hasCorrection) {
-        config.rx_correction = descriptor.correction.rx_correction;
-        config.tx_correction = descriptor.correction.tx_correction;
-      }
-
       const ack = {
         config_schema: AGENT_CONFIG_SCHEMA_VERSION,
         config_md5: descriptor.md5,
@@ -751,8 +756,11 @@ export class MetricsBroadcaster {
       };
 
       if (ack.has_config) {
+        // `body` keeps compatibility with currently deployed Go agents; `config_body`
+        // is the documented field, and `payload` carries the structured form.
+        ack.body = configBody;
         ack.config_body = configBody;
-        ack.config = config;
+        ack.payload = configPayload;
       }
 
       return ack;
@@ -760,6 +768,85 @@ export class MetricsBroadcaster {
       console.warn('[update-ws] Failed to build agent configuration:', e?.message || e);
       return null;
     }
+  }
+
+  _pushAgentConfigFrame(serverId, descriptor) {
+    const { configBody, configPayload, hasCorrection } = this._buildAgentConfigFrame(descriptor);
+    let delivered = 0;
+    let matched = 0;
+
+    for (const ws of this.state.getWebSockets()) {
+      const attachment = ws.deserializeAttachment() || {};
+      if (
+        attachment.kind !== AGENT_REPORT_KIND ||
+        !attachment.authenticated ||
+        attachment.serverId !== serverId
+      ) {
+        continue;
+      }
+      matched += 1;
+
+      if (normalizeConfigSchema(attachment.configSchema) !== String(AGENT_CONFIG_SCHEMA_VERSION)) {
+        continue;
+      }
+
+      const clientMd5 = normalizeConfigMd5(attachment.configMd5);
+      if (clientMd5 === descriptor.md5 && !hasCorrection) {
+        continue;
+      }
+
+      this._sendWsJson(ws, {
+        type: 'config',
+        ts: Date.now(),
+        config_schema: AGENT_CONFIG_SCHEMA_VERSION,
+        config_md5: descriptor.md5,
+        body: configBody,
+        config_body: configBody,
+        payload: configPayload
+      });
+      delivered += 1;
+    }
+
+    return { matched, delivered };
+  }
+
+  async _handleAgentConfigChanged(request) {
+    let body = null;
+    try {
+      body = await request.json();
+    } catch (_) {
+      return new Response(JSON.stringify({ error: 'invalid JSON' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    const serverId = String(body?.serverId || '').trim();
+    if (!this._isValidServerId(serverId)) {
+      return new Response(JSON.stringify({ error: 'invalid serverId' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    clearServerDetailCache();
+    this.agentServerDetails.delete(serverId);
+
+    const descriptor = await this._loadAgentConfigDescriptor(serverId, true);
+    if (!descriptor) {
+      return new Response(JSON.stringify({ error: 'server not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    const result = this._pushAgentConfigFrame(serverId, descriptor);
+    return new Response(JSON.stringify({ ok: true, ...result }), {
+      headers: {
+        'Cache-Control': 'no-store',
+        'Content-Type': 'application/json'
+      }
+    });
   }
 
   async _ackTrafficCorrection(serverId, data) {
@@ -971,8 +1058,16 @@ export class MetricsBroadcaster {
       agentVersion: normalizeAgentVersion(request.headers.get('X-Agent-Version')),
       reportIntervalMs: DEFAULT_AGENT_HISTORY_WRITE_INTERVAL_MS,
       lastD1WriteTs: 0,
-      configSchema: normalizeConfigSchema(request.headers.get(AGENT_CONFIG_SCHEMA_HEADER)),
-      configMd5: normalizeConfigMd5(request.headers.get(AGENT_CONFIG_MD5_HEADER))
+      configSchema: normalizeConfigSchema(firstDefined(
+        url.searchParams.get('config_schema'),
+        url.searchParams.get('agent_config_schema'),
+        request.headers.get(AGENT_CONFIG_SCHEMA_HEADER)
+      )),
+      configMd5: normalizeConfigMd5(firstDefined(
+        url.searchParams.get('config_md5'),
+        url.searchParams.get('agent_config_md5'),
+        request.headers.get(AGENT_CONFIG_MD5_HEADER)
+      ))
     });
 
     this._sendWsJson(server, {
@@ -1003,6 +1098,10 @@ export class MetricsBroadcaster {
 
     if (method === 'GET' && (path === '/update' || path.endsWith('/update'))) {
       return this._handleAgentReportWebSocket(request, url);
+    }
+
+    if (method === 'POST' && path === '/agent-config-changed') {
+      return this._handleAgentConfigChanged(request);
     }
 
     // ── 1) WebSocket 接入 ──────────────────────────────

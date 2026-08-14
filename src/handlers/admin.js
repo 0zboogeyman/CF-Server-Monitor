@@ -9,6 +9,7 @@ import { addServerColumns } from '../database/updateDatabase.js';
 import { clearResourceAlertState, sendNotification } from '../services/notification.js';
 import { getNextServerHistoryPartitionId, HISTORY_MAX_PARTITION_ID } from '../database/indexOptimization.js';
 import { isValidTrafficCorrection, validateAgentConfigInput, validatePingNode, validateNetworkInterfaces } from '../utils/agentConfig.js';
+import { scheduleAgentConfigChanged } from '../utils/agentConfigNotify.js';
 import { detectBillingCycle, detectCurrencySymbol, normalizeBillingCycle, normalizeCurrency, normalizePrice, renewExpireDateIfNeeded } from '../utils/serverBilling.js';
 
 const PING_NODE_FIELDS = ['custom_ct', 'custom_cu', 'custom_cm', 'custom_bd'];
@@ -379,7 +380,7 @@ async function getD1DailyUsage(token, accountId) {
   };
 }
 
-export async function handleAdminAPI(request, env, sys, loadFullSettings = null) {
+export async function handleAdminAPI(request, env, sys, loadFullSettings = null, ctx = null) {
   try {
     const data = await request.json();
 
@@ -858,6 +859,7 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null)
       }
       
       clearServersListCache();
+      scheduleAgentConfigChanged(env, ctx, id);
       
       return createSuccessResponse({ 
         success: true, 

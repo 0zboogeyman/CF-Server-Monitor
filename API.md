@@ -395,7 +395,7 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
   { "type": "ack", "ts": 1737638343000, "persisted": true, "nextD1WriteAfterMs": 60000, "nextWssReportAfterMs": 60000 }
   ```
   `persisted` 表示本条消息是否触发 D1 历史写入；`nextD1WriteAfterMs` 是距离下一次允许写入 D1 的最短等待时间。WSS 首条成功指标会立即写入一次 D1，后续按该服务器 `report_interval` 控制写入频率（允许值沿用配置：`30/60/120/180` 秒；异常回退 `60` 秒）。`nextWssReportAfterMs` 是服务端建议的下一次 WSS 上报间隔：有前端实时订阅或资源告警缓存活跃时约为 `report_interval / 20`，无实时消费者时回退到 `report_interval`，用于降低 idle 状态 DO WebSocket 消息数。
-  新版 WSS Agent 可在握手 Header 中携带 `X-Agent-Config-Schema: 3` 与 `X-Agent-Config-Md5` 记录当前配置状态；当某次上报消息携带 `config_schema: 3` / `config_md5` 时，ack 会同时返回动态配置协商字段：
+  新版 WSS Agent 可在握手 URL query 中携带 `config_schema=3` / `config_md5=<md5>`，也兼容握手 Header `X-Agent-Config-Schema: 3` 与 `X-Agent-Config-Md5` 记录当前配置状态；当某次上报消息携带 `config_schema: 3` / `config_md5` 时，ack 会同时返回动态配置协商字段：
   ```json
   {
     "type": "ack",
@@ -406,8 +406,9 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
     "config_schema": 3,
     "config_md5": "b4d7c0d...",
     "has_config": true,
+    "body": "collect_interval=0&report_interval=60&reset_day=1&schema_version=3&custom_ct=gd-ct-dualstack.ip.zstaticcdn.com&custom_cu=gd-cu-dualstack.ip.zstaticcdn.com&custom_cm=gd-cm-dualstack.ip.zstaticcdn.com&custom_bd=&interface=",
     "config_body": "collect_interval=0&report_interval=60&reset_day=1&schema_version=3&custom_ct=gd-ct-dualstack.ip.zstaticcdn.com&custom_cu=gd-cu-dualstack.ip.zstaticcdn.com&custom_cm=gd-cm-dualstack.ip.zstaticcdn.com&custom_bd=&interface=",
-    "config": {
+    "payload": {
       "collect_interval": 0,
       "report_interval": 60,
       "reset_day": 1,
@@ -421,7 +422,7 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
     }
   }
   ```
-  `has_config:false` 表示当前 MD5 一致且没有待确认流量修正；`has_config:true` 时 Agent 应优先按 `config_body` 复用 POST 动态配置解析逻辑，或读取结构化 `config`。官方 WSS Agent 默认仅在首次上报、约每 60 秒或本地配置 MD5 变化时携带 `config_schema` / `config_md5`；本次消息未携带这些字段时，ack 可以只包含 `persisted` / `nextD1WriteAfterMs` / `nextWssReportAfterMs` 等基础字段，不携带配置协商字段。若存在待确认流量修正，`config_body` 与 `config` 会追加 `rx_correction` / `tx_correction`，Agent 应应用后通过 WSS 或 POST 回传确认。
+  `has_config:false` 表示当前 MD5 一致且没有待确认流量修正；`has_config:true` 时 Agent 应优先按 `body` / `config_body` 复用 POST 动态配置解析逻辑，或读取结构化 `payload`。官方 WSS Agent 默认仅在首次上报、约每 60 秒或本地配置 MD5 变化时携带 `config_schema` / `config_md5`；本次消息未携带这些字段时，ack 可以只包含 `persisted` / `nextD1WriteAfterMs` / `nextWssReportAfterMs` 等基础字段，不携带配置协商字段。若存在待确认流量修正，`body` / `config_body` 与 `payload` 会追加 `rx_correction` / `tx_correction`，Agent 应应用后通过 WSS 或 POST 回传确认。
 - 流量修正确认成功：
   ```json
   { "type": "ack", "ts": 1737638343000, "correction": true }
@@ -1752,7 +1753,7 @@ UUID 缺失或格式非法时返回 `400 { "error": "invalidServerId", "code": 4
 | `pong`   | S → C | 自动响应的精确文本 `{"type":"pong"}`，不带 `ts`   |
 | `batchUpdate` | S → C | `{ ts: number, updates: Array<{ serverId: string, samples: Array<{ ts: number, data: Partial<Server> }> }> }` |
 | `update` | C → S | `/update` WSS 上报可选包装格式：`{ type:"update", id:string, secret:string, payload:{ metrics?:object, samples?:array, batch?:array } }` |
-| `ack` | S → C | `/update` WSS 上报确认：`{ ts:number, persisted?:boolean, nextD1WriteAfterMs?:number, nextWssReportAfterMs?:number, correction?:true, config_schema?:number, config_md5?:string, has_config?:boolean, config_body?:string, config?:object }` |
+| `ack` | S → C | `/update` WSS 上报确认：`{ ts:number, persisted?:boolean, nextD1WriteAfterMs?:number, nextWssReportAfterMs?:number, correction?:true, config_schema?:number, config_md5?:string, has_config?:boolean, body?:string, config_body?:string, payload?:object }` |
 | `error` | S → C | `/update` WSS 上报错误：`{ ts:number, error:string, code:number }`；随后服务端通常以 close code `1008` 关闭连接 |
 
 客户端发来的 `pong` 会被静默忽略；它不是服务端定时发送的双向心跳协议。

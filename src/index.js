@@ -400,7 +400,7 @@ export default {
       }},
       { method: 'POST', path: '/admin/api', handler: async () => {
         await ensureSiteSettings();
-        return handleAdminAPI(request, env, sys, ensureFullSettings);
+        return handleAdminAPI(request, env, sys, ensureFullSettings, ctx);
       }},
       { method: 'POST', path: '/updateDatabase', handler: async () => {
         await ensureSiteSettings();

@@ -9,11 +9,11 @@ globalThis.WebSocketRequestResponsePair = class WebSocketRequestResponsePair {
   }
 };
 
-function makeBroadcaster() {
+function makeBroadcaster(webSockets = []) {
   return new MetricsBroadcaster({
     setWebSocketAutoResponse() {},
     getWebSockets() {
-      return [];
+      return webSockets;
     },
     storage: {
       async get() {
@@ -124,4 +124,37 @@ test('WSS agent config ack is built when report includes config state', async ()
   assert.equal(loads, 1);
   assert.equal(ack.has_config, true);
   assert.equal(ack.config_md5, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+  assert.equal(ack.body, makeDescriptor().serialized);
+  assert.equal(ack.config_body, makeDescriptor().serialized);
+  assert.equal(ack.payload.report_interval, 60);
+  assert.equal(Object.prototype.hasOwnProperty.call(ack, 'config'), false);
+});
+
+test('WSS agent config push uses string body and structured payload', () => {
+  const sent = [];
+  const ws = {
+    deserializeAttachment() {
+      return {
+        kind: 'agent-report',
+        authenticated: true,
+        serverId: 'server-1',
+        configSchema: '3',
+        configMd5: 'none'
+      };
+    },
+    send(message) {
+      sent.push(JSON.parse(message));
+    }
+  };
+  const broadcaster = makeBroadcaster([ws]);
+
+  const result = broadcaster._pushAgentConfigFrame('server-1', makeDescriptor());
+
+  assert.deepEqual(result, { matched: 1, delivered: 1 });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].type, 'config');
+  assert.equal(sent[0].body, makeDescriptor().serialized);
+  assert.equal(sent[0].config_body, makeDescriptor().serialized);
+  assert.equal(sent[0].payload.report_interval, 60);
+  assert.equal(Object.prototype.hasOwnProperty.call(sent[0], 'config'), false);
 });

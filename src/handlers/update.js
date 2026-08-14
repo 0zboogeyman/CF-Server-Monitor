@@ -17,6 +17,7 @@ import {
   isValidTrafficCorrection,
   serializeCorrection
 } from '../utils/agentConfig.js';
+import { scheduleAgentConfigChanged } from '../utils/agentConfigNotify.js';
 
 // 将最新一次上报打包成前端可直接消费的 "当前状态" 对象
 // 与 /api/server 和 /api/servers 返回的字段保持一致，便于页面直接合并
@@ -274,6 +275,7 @@ export async function handleUpdate(request, env, ctx) {
           AND ABS(COALESCE(tx_correction, 0) - ?) < 0.000001
       `).bind(id, ackRx, ackTx).run();
       clearServerDetailCache();
+      scheduleAgentConfigChanged(env, ctx, id);
 
       return new Response('OK', {
         status: 200,
