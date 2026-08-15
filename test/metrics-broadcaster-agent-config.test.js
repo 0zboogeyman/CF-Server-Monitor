@@ -109,8 +109,10 @@ test('WSS agent standard WebSocket adapter preserves attachment state', async ()
 
 test('WSS agent ack suggests realtime or idle report interval', () => {
   const broadcaster = makeBroadcaster();
-  assert.equal(broadcaster._getAgentNextWssReportAfterMs(60000, true), 3000);
-  assert.equal(broadcaster._getAgentNextWssReportAfterMs(60000, false), 60000);
+  assert.equal(broadcaster._getAgentNextWssReportAfterMs(60000, true), 4000);
+  assert.equal(broadcaster._getAgentNextWssReportAfterMs(60000, false), 8000);
+  assert.equal(broadcaster._getAgentNextWssReportAfterMs(120000, false), 16000);
+  assert.equal(broadcaster._getAgentNextWssReportAfterMs(180000, false), 24000);
   assert.equal(broadcaster._getAgentNextWssReportAfterMs(30000, true), 2000);
   assert.equal(
     broadcaster._getAgentNextWssReportAfterMs(30000, {
@@ -134,7 +136,7 @@ test('WSS agent ack suggests realtime or idle report interval', () => {
       resourceAlertActive: true,
       realtimeActive: true
     }),
-    3000
+    4000
   );
 });
 

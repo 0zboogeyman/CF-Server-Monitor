@@ -44,7 +44,8 @@ const AGENT_REPORT_KIND = 'agent-report';
 const DEFAULT_AGENT_HISTORY_WRITE_INTERVAL_MS = 60 * 1000;
 const ALLOWED_AGENT_REPORT_INTERVALS = new Set([30, 60, 120, 180]);
 const AGENT_SERVER_DETAIL_TTL_MS = 120 * 1000;
-const AGENT_REALTIME_REPORT_DIVISOR = 20;
+const AGENT_REALTIME_REPORT_DIVISOR = 15;
+const IDLE_AGENT_WSS_REPORT_INTERVAL_MULTIPLIER = 2;
 const RESOURCE_ALERT_AGENT_REPORT_INTERVAL_MS = 60 * 1000;
 const LATEST_REPORT_TTL_MS = 5 * 60 * 1000;
 const MAX_LATEST_REPORT_SERVERS = 1000;
@@ -1057,14 +1058,17 @@ export class MetricsBroadcaster {
       Number(reportIntervalMs) || DEFAULT_AGENT_HISTORY_WRITE_INTERVAL_MS
     );
     const state = this._normalizeRealtimeState(realtimeState);
-    if (!state.realtimeActive) return historyIntervalMs;
+    const realtimeIntervalMs = Math.max(
+      1000,
+      Math.ceil((historyIntervalMs / 1000) / AGENT_REALTIME_REPORT_DIVISOR) * 1000
+    );
+    if (!state.realtimeActive) return realtimeIntervalMs * IDLE_AGENT_WSS_REPORT_INTERVAL_MULTIPLIER;
 
     if (!state.frontendActive && state.resourceAlertActive) {
       return Math.max(historyIntervalMs, RESOURCE_ALERT_AGENT_REPORT_INTERVAL_MS);
     }
 
-    const seconds = Math.max(1, Math.ceil((historyIntervalMs / 1000) / AGENT_REALTIME_REPORT_DIVISOR));
-    return seconds * 1000;
+    return realtimeIntervalMs;
   }
 
   async _persistAgentHistoryIfDue(ws, attachment, payload) {
