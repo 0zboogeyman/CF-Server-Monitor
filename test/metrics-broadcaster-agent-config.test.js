@@ -404,6 +404,43 @@ test('agent report mode change closes existing Agent WSS when disabled', async (
   }]);
 });
 
+test('batch push latestReportOnly keeps latest report updates without subscribers', async () => {
+  const broadcaster = makeBroadcaster([]);
+  const response = await broadcaster.fetch(new Request('http://internal/batch-push', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      latestReportOnly: true,
+      updates: [{
+        serverId: 'server-1',
+        samples: [
+          { ts: 1_000, payload: { cpu: 10, net_in_speed: 100 } },
+          { ts: 2_000, payload: { cpu: 20, net_in_speed: 200 } }
+        ]
+      }]
+    })
+  }));
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.latestReportOnly, true);
+  assert.equal(body.subscribers, 0);
+
+  const latestResponse = await broadcaster.fetch(new Request('http://internal/latest-report-updates', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serverIds: ['server-1'], includeLatencyWindows: false })
+  }));
+  const latest = await latestResponse.json();
+
+  assert.equal(latestResponse.status, 200);
+  assert.equal(latest.updates.length, 1);
+  assert.equal(latest.updates[0].serverId, 'server-1');
+  assert.equal(latest.updates[0].samples.length, 2);
+  assert.deepEqual(latest.updates[0].samples.map(sample => sample.data.cpu), [10, 20]);
+  assert.equal(Number.isFinite(latest.updates[0].reportAgeMs), true);
+});
+
 test('resource alert rule batches are capped at 20 rules', () => {
   const broadcaster = makeBroadcaster();
   const makeRule = index => ({

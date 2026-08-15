@@ -179,8 +179,11 @@ async function getDurableRealtimeState(env, serverIds, options = {}) {
   const empty = { latestReportUpdates: [], latencyWindows: [] };
   if (!env.METRICS_BROADCASTER || !Array.isArray(serverIds) || serverIds.length === 0) return empty;
 
-  const cachedState = getCachedRealtimeState(serverIds, { includeLatencyWindows });
-  if (cachedState) return cachedState;
+  // latestReportUpdates 需要跟随每次上报刷新；这里只复用较稳定的延迟窗口缓存。
+  const cachedState = includeLatencyWindows
+    ? getCachedRealtimeState(serverIds, { includeLatencyWindows })
+    : null;
+  const shouldFetchLatencyWindows = includeLatencyWindows && !cachedState;
 
   try {
     const id = env.METRICS_BROADCASTER.idFromName('global');
@@ -193,20 +196,32 @@ async function getDurableRealtimeState(env, serverIds, options = {}) {
       const response = await stub.fetch('http://internal/latest-report-updates', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ serverIds: chunk, includeLatencyWindows })
+        body: JSON.stringify({ serverIds: chunk, includeLatencyWindows: shouldFetchLatencyWindows })
       });
       if (!response.ok) continue;
       const data = await response.json();
       if (Array.isArray(data?.updates)) updates.push(...data.updates);
-      if (includeLatencyWindows && Array.isArray(data?.latencyWindows)) latencyWindows.push(...data.latencyWindows);
+      if (shouldFetchLatencyWindows && Array.isArray(data?.latencyWindows)) {
+        latencyWindows.push(...data.latencyWindows);
+      }
     }
 
-    const state = { latestReportUpdates: updates, latencyWindows };
-    cacheRealtimeState(serverIds, state, { includeLatencyWindows });
+    const state = {
+      latestReportUpdates: updates,
+      latencyWindows: shouldFetchLatencyWindows
+        ? latencyWindows
+        : (cachedState?.latencyWindows || [])
+    };
+    if (shouldFetchLatencyWindows) {
+      cacheRealtimeState(serverIds, { latestReportUpdates: [], latencyWindows }, { includeLatencyWindows });
+    }
     return state;
   } catch (e) {
     console.warn('[Dashboard] Failed to read realtime state:', e?.message || e);
-    return empty;
+    return {
+      latestReportUpdates: [],
+      latencyWindows: cachedState?.latencyWindows || []
+    };
   }
 }
 

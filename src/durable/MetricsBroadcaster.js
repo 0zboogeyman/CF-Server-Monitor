@@ -1519,14 +1519,27 @@ export class MetricsBroadcaster {
       }
 
       const maintainState = body?.maintainState === true;
+      const latestReportOnly = body?.latestReportOnly === true;
       const subscribers = this._getFrontendSubscriberCount();
-      if (!maintainState && subscribers === 0) {
+      if (!maintainState && !latestReportOnly && subscribers === 0) {
         return new Response(JSON.stringify({ ok: true, skipped: true, count: normalizedUpdates.length, subscribers: 0 }), {
           headers: { 'Content-Type': 'application/json' }
         });
       }
 
       const reportTs = Date.now();
+      if (latestReportOnly && subscribers === 0) {
+        this._cacheLatestReportUpdates(normalizedUpdates, reportTs);
+        return new Response(JSON.stringify({
+          ok: true,
+          count: normalizedUpdates.length,
+          subscribers,
+          latestReportOnly: true
+        }), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
       await this._ingestRealtimeUpdates(normalizedUpdates, reportTs);
 
       return new Response(JSON.stringify({ ok: true, count: normalizedUpdates.length, subscribers }), {

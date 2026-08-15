@@ -353,12 +353,15 @@ async function getRealtimeBatchIntent(env) {
   }
 
   const subscribers = await getCachedFrontendSubscriberCount(env);
-  if (subscribers <= 0) {
-    return null;
+  if (subscribers > 0) {
+    return {
+      maintainState: false
+    };
   }
 
   return {
-    maintainState: false
+    maintainState: false,
+    latestReportOnly: true
   };
 }
 
@@ -406,7 +409,11 @@ async function _flushBatch(env) {
     await stub.fetch('http://internal/batch-push', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ updates, maintainState: intent.maintainState })
+      body: JSON.stringify({
+        updates,
+        maintainState: intent.maintainState,
+        latestReportOnly: intent.latestReportOnly === true
+      })
     });
   } catch (e) {
     console.warn('[broadcast] batch push failed:', e.message || e);
