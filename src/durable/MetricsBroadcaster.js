@@ -46,7 +46,6 @@ const ALLOWED_AGENT_REPORT_INTERVALS = new Set([30, 60, 120, 180]);
 const AGENT_SERVER_DETAIL_TTL_MS = 120 * 1000;
 const AGENT_REALTIME_REPORT_DIVISOR = 15;
 const IDLE_AGENT_WSS_REPORT_INTERVAL_MULTIPLIER = 2;
-const RESOURCE_ALERT_AGENT_REPORT_INTERVAL_MS = 60 * 1000;
 const LATEST_REPORT_TTL_MS = 5 * 60 * 1000;
 const MAX_LATEST_REPORT_SERVERS = 1000;
 const RESOURCE_ALERT_STORAGE_KEY = 'resource_alert_windows_v1';
@@ -446,6 +445,7 @@ export class MetricsBroadcaster {
     this.agentHistoryWrites = new Map();
     this.standardAgentWebSocketCount = 0;
     this.standardAgentWebSockets = new Set();
+    this.lastAgentRealtimeHintAt = 0;
 
     // 自动响应 ping 心跳，DO 无需被唤醒
     // @ts-ignore - Cloudflare Workers 运行时提供 WebSocketRequestResponsePair
@@ -1062,13 +1062,60 @@ export class MetricsBroadcaster {
       1000,
       Math.ceil((historyIntervalMs / 1000) / AGENT_REALTIME_REPORT_DIVISOR) * 1000
     );
-    if (!state.realtimeActive) return realtimeIntervalMs * IDLE_AGENT_WSS_REPORT_INTERVAL_MULTIPLIER;
+    return state.frontendActive
+      ? realtimeIntervalMs
+      : realtimeIntervalMs * IDLE_AGENT_WSS_REPORT_INTERVAL_MULTIPLIER;
+  }
 
-    if (!state.frontendActive && state.resourceAlertActive) {
-      return Math.max(historyIntervalMs, RESOURCE_ALERT_AGENT_REPORT_INTERVAL_MS);
+  async _getAgentHintReportIntervalMs(attachment) {
+    const attachedReportIntervalMs = Number(attachment?.reportIntervalMs);
+    if (attachment?.serverId) {
+      try {
+        const serverDetail = await this._getAgentServerDetail(attachment.serverId);
+        if (serverDetail) {
+          const configuredReportIntervalMs = this._getReportIntervalMs(serverDetail);
+          if (configuredReportIntervalMs) return configuredReportIntervalMs;
+        }
+      } catch (e) {
+        console.warn('[update-ws] Failed to load agent interval for realtime hint:', e?.message || e);
+      }
+    }
+    if (Number.isFinite(attachedReportIntervalMs) && attachedReportIntervalMs > 0) {
+      return attachedReportIntervalMs;
+    }
+    return DEFAULT_AGENT_HISTORY_WRITE_INTERVAL_MS;
+  }
+
+  async _hintAgentRealtimeIntervals(realtimeState = null) {
+    const now = Date.now();
+    const state = realtimeState || this._getAgentRealtimeState(now);
+    if (!state.frontendActive) return 0;
+    if (now - this.lastAgentRealtimeHintAt < 1000) return 0;
+    this.lastAgentRealtimeHintAt = now;
+
+    let hinted = 0;
+    for (const ws of this._getAgentReportWebSockets()) {
+      const attachment = ws.deserializeAttachment() || {};
+      if (
+        attachment.kind !== AGENT_REPORT_KIND ||
+        !attachment.authenticated ||
+        !attachment.serverId
+      ) {
+        continue;
+      }
+
+      const reportIntervalMs = await this._getAgentHintReportIntervalMs(attachment);
+      const nextWssReportAfterMs = this._getAgentNextWssReportAfterMs(reportIntervalMs, state);
+      this._sendWsJson(ws, {
+        type: 'ack',
+        ts: Date.now(),
+        realtimeHint: true,
+        nextWssReportAfterMs
+      });
+      hinted += 1;
     }
 
-    return realtimeIntervalMs;
+    return hinted;
   }
 
   async _persistAgentHistoryIfDue(ws, attachment, payload) {
@@ -2092,6 +2139,15 @@ export class MetricsBroadcaster {
             count: serverIds.length
           }));
         } catch (_) {}
+        try {
+          await this._hintAgentRealtimeIntervals({
+            frontendActive: true,
+            resourceAlertActive: this._shouldCacheResourceAlertSamples(),
+            realtimeActive: true
+          });
+        } catch (e) {
+          console.warn('[ws] Failed to hint agent realtime interval:', e?.message || e);
+        }
         return;
       }
       if (msg && msg.type === 'pong') return;
