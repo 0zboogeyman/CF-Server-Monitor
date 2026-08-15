@@ -5,11 +5,12 @@
 //   scope = 'all'        -> 订阅所有服务器更新（首页）
 //   scope = <serverId>   -> 只订阅某台服务器的更新（详情页）
 //
-// - 后端 /update 处理器在成功写入 DB 后，调用 /__do_push/<id>
-//   由本 DO 向所有订阅者广播刚收到的指标。
+// - 后端 /update WSS 由本 DO 接收 Agent 指标，并向所有订阅者广播。
+// - 兼容旧 POST 上报，/update 处理器在成功写入 DB 后会调用 /__do_push/<id>。
 //
-// - 使用 DO WebSocket Hibernation API，闲置时休眠以节省资源。
+// - 前端订阅连接使用 DO WebSocket Hibernation API，闲置时休眠以节省资源。
 //   通过 setWebSocketAutoResponse 自动响应 ping，无需唤醒 DO。
+// - Agent 上报连接使用标准 WebSocket API，避免高频指标消息计为 hibernation wakeup。
 
 import { saveMetricsHistory } from '../database/schema.js';
 import { ensureServerOptimization } from '../database/indexOptimization.js';
@@ -17,9 +18,11 @@ import { getServerDetail, clearServerDetailCache } from '../utils/cache.js';
 import { loadSiteSettings } from '../utils/settings.js';
 import {
   AGENT_CONFIG_MD5_HEADER,
+  AGENT_CONFIG_LEGACY_SCHEMA_VERSION,
   AGENT_CONFIG_SCHEMA_HEADER,
   AGENT_CONFIG_SCHEMA_VERSION,
   describeAgentConfig,
+  normalizeAgentConfigSchemaVersion,
   serializeCorrection
 } from '../utils/agentConfig.js';
 import {
@@ -440,6 +443,8 @@ export class MetricsBroadcaster {
     this.latencyWindowLastSnapshotSave = new Map();
     this.agentServerDetails = new Map();
     this.agentHistoryWrites = new Map();
+    this.standardAgentWebSocketCount = 0;
+    this.standardAgentWebSockets = new Set();
 
     // 自动响应 ping 心跳，DO 无需被唤醒
     // @ts-ignore - Cloudflare Workers 运行时提供 WebSocketRequestResponsePair
@@ -587,6 +592,17 @@ export class MetricsBroadcaster {
     return this._getFrontendWebSockets().length;
   }
 
+  _getAgentReportWebSockets() {
+    const sockets = new Set(this.standardAgentWebSockets);
+    for (const ws of this.state.getWebSockets()) {
+      const attachment = ws.deserializeAttachment();
+      if (attachment?.kind === AGENT_REPORT_KIND) {
+        sockets.add(ws);
+      }
+    }
+    return Array.from(sockets);
+  }
+
   _isWebSocketUpgrade(request) {
     const upgradeHeader = request.headers.get('Upgrade');
     return !!upgradeHeader && upgradeHeader.toLowerCase() === 'websocket';
@@ -596,6 +612,46 @@ export class MetricsBroadcaster {
     try {
       ws.send(JSON.stringify(payload));
     } catch (_) {}
+  }
+
+  _acceptStandardAgentWebSocket(server, initialAttachment) {
+    // Agent 上报连接使用标准 WebSocket API，避免每条业务消息都成为 hibernation wakeup。
+    // 代价是只要 Agent 长连接存在，本 DO 就不能休眠，会持续产生 duration。
+    server.accept();
+
+    const session = { attachment: initialAttachment || {} };
+    const ws = {
+      send: data => server.send(data),
+      close: (code, reason) => server.close(code, reason),
+      serializeAttachment(value) {
+        session.attachment = value || {};
+      },
+      deserializeAttachment() {
+        return session.attachment;
+      }
+    };
+
+    this.standardAgentWebSocketCount += 1;
+    this.standardAgentWebSockets.add(ws);
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      this.standardAgentWebSocketCount = Math.max(0, this.standardAgentWebSocketCount - 1);
+      this.standardAgentWebSockets.delete(ws);
+    };
+
+    server.addEventListener('message', event => {
+      this._handleAgentReportMessage(ws, event.data, ws.deserializeAttachment())
+        .catch(error => {
+          console.warn('[update-ws] Agent standard WebSocket message failed:', error?.message || error);
+          this._closeWsWithError(ws, 'Internal error', 500);
+        });
+    });
+    server.addEventListener('close', cleanup);
+    server.addEventListener('error', cleanup);
+
+    return ws;
   }
 
   _closeWsWithError(ws, message, code = 400) {
@@ -785,13 +841,13 @@ export class MetricsBroadcaster {
     };
   }
 
-  async _loadAgentConfigDescriptor(serverId, forceRefresh = false) {
+  async _loadAgentConfigDescriptor(serverId, forceRefresh = false, schemaVersion = AGENT_CONFIG_SCHEMA_VERSION) {
     const [serverDetail, settings] = await Promise.all([
       this._getAgentServerDetail(serverId, forceRefresh),
       loadSiteSettings(this.env.DB)
     ]);
     if (!serverDetail) return null;
-    return describeAgentConfig(serverDetail, settings);
+    return describeAgentConfig(serverDetail, settings, schemaVersion);
   }
 
   _buildAgentConfigFrame(descriptor) {
@@ -811,19 +867,20 @@ export class MetricsBroadcaster {
   }
 
   async _buildAgentConfigAck(context) {
-    if (!context || !context.agentConfig?.requested || context.agentConfig?.schema !== String(AGENT_CONFIG_SCHEMA_VERSION)) {
+    const schemaVersion = normalizeAgentConfigSchemaVersion(context?.agentConfig?.schema);
+    if (!context || !context.agentConfig?.requested || !schemaVersion) {
       return null;
     }
 
     const clientMd5 = normalizeConfigMd5(context.agentConfig.md5);
     try {
-      const descriptor = await this._loadAgentConfigDescriptor(context.serverId);
+      const descriptor = await this._loadAgentConfigDescriptor(context.serverId, false, schemaVersion);
       if (!descriptor) return null;
 
       const { configBody, configPayload, hasCorrection } = this._buildAgentConfigFrame(descriptor);
       const md5Changed = clientMd5 !== descriptor.md5;
       const ack = {
-        config_schema: AGENT_CONFIG_SCHEMA_VERSION,
+        config_schema: schemaVersion,
         config_md5: descriptor.md5,
         has_config: md5Changed || hasCorrection
       };
@@ -843,12 +900,20 @@ export class MetricsBroadcaster {
     }
   }
 
-  _pushAgentConfigFrame(serverId, descriptor) {
-    const { configBody, configPayload, hasCorrection } = this._buildAgentConfigFrame(descriptor);
+  _pushAgentConfigFrame(serverId, descriptors) {
     let delivered = 0;
     let matched = 0;
 
-    for (const ws of this.state.getWebSockets()) {
+    const descriptorForSchema = (schema) => {
+      const schemaVersion = normalizeAgentConfigSchemaVersion(schema);
+      if (!schemaVersion) return null;
+      if (descriptors instanceof Map) {
+        return descriptors.get(schemaVersion) || null;
+      }
+      return schemaVersion === AGENT_CONFIG_SCHEMA_VERSION ? descriptors : null;
+    };
+
+    for (const ws of this._getAgentReportWebSockets()) {
       const attachment = ws.deserializeAttachment() || {};
       if (
         attachment.kind !== AGENT_REPORT_KIND ||
@@ -859,10 +924,10 @@ export class MetricsBroadcaster {
       }
       matched += 1;
 
-      if (normalizeConfigSchema(attachment.configSchema) !== String(AGENT_CONFIG_SCHEMA_VERSION)) {
-        continue;
-      }
+      const descriptor = descriptorForSchema(attachment.configSchema);
+      if (!descriptor) continue;
 
+      const { configBody, configPayload, hasCorrection } = this._buildAgentConfigFrame(descriptor);
       const clientMd5 = normalizeConfigMd5(attachment.configMd5);
       if (clientMd5 === descriptor.md5 && !hasCorrection) {
         continue;
@@ -871,7 +936,7 @@ export class MetricsBroadcaster {
       this._sendWsJson(ws, {
         type: 'config',
         ts: Date.now(),
-        config_schema: AGENT_CONFIG_SCHEMA_VERSION,
+        config_schema: descriptor.config.schema_version,
         config_md5: descriptor.md5,
         body: configBody,
         config_body: configBody,
@@ -905,7 +970,7 @@ export class MetricsBroadcaster {
     clearServerDetailCache();
     this.agentServerDetails.delete(serverId);
 
-    const descriptor = await this._loadAgentConfigDescriptor(serverId, true);
+    const descriptor = await this._loadAgentConfigDescriptor(serverId, true, AGENT_CONFIG_SCHEMA_VERSION);
     if (!descriptor) {
       return new Response(JSON.stringify({ error: 'server not found' }), {
         status: 404,
@@ -913,7 +978,13 @@ export class MetricsBroadcaster {
       });
     }
 
-    const result = this._pushAgentConfigFrame(serverId, descriptor);
+    const descriptors = new Map([[AGENT_CONFIG_SCHEMA_VERSION, descriptor]]);
+    for (let schemaVersion = AGENT_CONFIG_LEGACY_SCHEMA_VERSION; schemaVersion < AGENT_CONFIG_SCHEMA_VERSION; schemaVersion++) {
+      const legacyDescriptor = await this._loadAgentConfigDescriptor(serverId, false, schemaVersion);
+      if (legacyDescriptor) descriptors.set(schemaVersion, legacyDescriptor);
+    }
+
+    const result = this._pushAgentConfigFrame(serverId, descriptors);
     return new Response(JSON.stringify({ ok: true, ...result }), {
       headers: {
         'Cache-Control': 'no-store',
@@ -1159,8 +1230,7 @@ export class MetricsBroadcaster {
     // @ts-ignore - Cloudflare Workers runtime provides WebSocketPair
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
-    this.state.acceptWebSocket(server);
-    server.serializeAttachment({
+    const agentSocket = this._acceptStandardAgentWebSocket(server, {
       kind: AGENT_REPORT_KIND,
       authenticated: false,
       serverId: '',
@@ -1181,7 +1251,7 @@ export class MetricsBroadcaster {
       ))
     });
 
-    this._sendWsJson(server, {
+    this._sendWsJson(agentSocket, {
       type: 'hello',
       ts: Date.now(),
       protocol: 'update'
@@ -1433,8 +1503,9 @@ export class MetricsBroadcaster {
     // ── 3) 健康检查 ────────────────────────────────────
     if (method === 'GET' && (path === '/health' || path.endsWith('/health'))) {
       const subscribers = this._getFrontendSubscriberCount();
-      const sockets = this.state.getWebSockets().length;
-      return new Response(JSON.stringify({ ok: true, subscribers, sockets }), {
+      const agentSockets = this.standardAgentWebSocketCount;
+      const sockets = this.state.getWebSockets().length + agentSockets;
+      return new Response(JSON.stringify({ ok: true, subscribers, sockets, agentSockets }), {
         headers: { 'Content-Type': 'application/json' }
       });
     }

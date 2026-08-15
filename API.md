@@ -223,10 +223,10 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
   ```
   Content-Type: application/json
   X-Agent-Version: <探针版本号>
-  X-Agent-Config-Schema: 3
+  X-Agent-Config-Schema: 4
   X-Agent-Config-Md5: <最后成功应用的配置 MD5，首次为 none>
   ```
-  动态配置请求头为新版探针使用的可选字段；未携带时保持旧版响应协议。
+  动态配置请求头为新版探针使用的可选字段；当前新 Go Agent 使用 schema `4`。schema `3` 仍按旧兼容配置返回，未携带时保持旧版响应协议。
 
   WebSocket 握手只能使用 `GET + Upgrade`，这是 WebSocket 协议限制；后端仍通过同一个 `/update` 路径区分 `POST` 与 `wss`。握手成功后服务端先发送：
 
@@ -363,7 +363,7 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
 
 **Response**
 
-- 旧版探针（未携带 `X-Agent-Config-Schema: 3`）：返回 `200 OK`：
+- 旧版探针（未携带受支持的 `X-Agent-Config-Schema`）：返回 `200 OK`：
   ```
   OK
   ```
@@ -372,10 +372,10 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
 - 新版探针且配置 MD5 不一致，或仍有待确认流量修正：返回 `200 OK`，响应头携带当前
   `X-Agent-Config-Schema` 与 `X-Agent-Config-Md5`，响应体以固定顺序的完整 QueryParam 配置开头：
   ```text
-  collect_interval=0&report_interval=60&reset_day=1&schema_version=3&custom_ct=gd-ct-dualstack.ip.zstaticcdn.com&custom_cu=gd-cu-dualstack.ip.zstaticcdn.com&custom_cm=gd-cm-dualstack.ip.zstaticcdn.com&custom_bd=ip.zstaticcdn.com&interface=
+  collect_interval=0&report_interval=60&reset_day=1&schema_version=4&custom_ct=gd-ct-dualstack.ip.zstaticcdn.com&custom_cu=gd-cu-dualstack.ip.zstaticcdn.com&custom_cm=gd-cm-dualstack.ip.zstaticcdn.com&custom_bd=ip.zstaticcdn.com&interface=&connection_mode=auto
   ```
   （`Content-Type: application/x-www-form-urlencoded; charset=utf-8`）
-- ~~动态配置包含 `traffic_calc_type`、`traffic_limit`、`auto_update` 等全部探针运行参数。~~ **2026-07-26 修订，2026-07-31 更新**：MD5 覆盖的规范配置仅包含 `collect_interval`、`report_interval`、`reset_day`、`schema_version`、`custom_ct`、`custom_cu`、`custom_cm`、`custom_bd`、`interface`。待应用的 `rx_correction`、`tx_correction` 会追加到响应体，但不参与配置 MD5；启用自动更新且版本不一致时追加 `update=1`。
+- ~~动态配置包含 `traffic_calc_type`、`traffic_limit`、`auto_update` 等全部探针运行参数。~~ **2026-07-26 修订，2026-07-31 更新，2026-08-15 更新**：schema `4` 的 MD5 覆盖规范配置包含 `collect_interval`、`report_interval`、`reset_day`、`schema_version`、`custom_ct`、`custom_cu`、`custom_cm`、`custom_bd`、`interface`、`connection_mode`；schema `3` 兼容响应不包含 `connection_mode`。待应用的 `rx_correction`、`tx_correction` 会追加到响应体，但不参与配置 MD5；启用自动更新且版本不一致时追加 `update=1`。
 - 探针应用流量修正后，可在下一次 `POST /update` 顶层回传 `rx_correction` / `tx_correction`。值匹配时后端清空待修正字段并直接返回纯文本 `OK`，本次请求不要求 `metrics`。
 - 失败：
   ```json
@@ -395,7 +395,7 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
   { "type": "ack", "ts": 1737638343000, "persisted": true, "nextD1WriteAfterMs": 60000, "nextWssReportAfterMs": 60000 }
   ```
   `persisted` 表示本条消息是否触发 D1 历史写入；`nextD1WriteAfterMs` 是距离下一次允许写入 D1 的最短等待时间。WSS 首条成功指标会立即写入一次 D1，后续按该服务器 `report_interval` 控制写入频率（允许值沿用配置：`30/60/120/180` 秒；异常回退 `60` 秒）。`nextWssReportAfterMs` 是服务端建议的下一次 WSS 上报间隔：有前端实时订阅时约为 `report_interval / 15`；仅资源告警缓存活跃且无前端订阅时至少 `60` 秒；无实时消费者时回退到 `report_interval`，用于降低 idle 状态 DO WebSocket 消息数。
-  新版 WSS Agent 可在握手 URL query 中携带 `config_schema=3` / `config_md5=<md5>`，也兼容握手 Header `X-Agent-Config-Schema: 3` 与 `X-Agent-Config-Md5` 记录当前配置状态；当某次上报消息携带 `config_schema: 3` / `config_md5` 时，ack 会同时返回动态配置协商字段：
+  新版 WSS Agent 可在握手 URL query 中携带 `config_schema=4` / `config_md5=<md5>`，也兼容握手 Header `X-Agent-Config-Schema: 4` 与 `X-Agent-Config-Md5` 记录当前配置状态；当某次上报消息携带 `config_schema: 4` / `config_md5` 时，ack 会同时返回动态配置协商字段。兼容 schema `3` 的 Agent 仍会收到不含 `connection_mode` 的 schema `3` 配置：
   ```json
   {
     "type": "ack",
@@ -403,21 +403,22 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
     "persisted": false,
     "nextD1WriteAfterMs": 30000,
     "nextWssReportAfterMs": 3000,
-    "config_schema": 3,
+    "config_schema": 4,
     "config_md5": "b4d7c0d...",
     "has_config": true,
-    "body": "collect_interval=0&report_interval=60&reset_day=1&schema_version=3&custom_ct=gd-ct-dualstack.ip.zstaticcdn.com&custom_cu=gd-cu-dualstack.ip.zstaticcdn.com&custom_cm=gd-cm-dualstack.ip.zstaticcdn.com&custom_bd=&interface=",
-    "config_body": "collect_interval=0&report_interval=60&reset_day=1&schema_version=3&custom_ct=gd-ct-dualstack.ip.zstaticcdn.com&custom_cu=gd-cu-dualstack.ip.zstaticcdn.com&custom_cm=gd-cm-dualstack.ip.zstaticcdn.com&custom_bd=&interface=",
+    "body": "collect_interval=0&report_interval=60&reset_day=1&schema_version=4&custom_ct=gd-ct-dualstack.ip.zstaticcdn.com&custom_cu=gd-cu-dualstack.ip.zstaticcdn.com&custom_cm=gd-cm-dualstack.ip.zstaticcdn.com&custom_bd=&interface=&connection_mode=auto",
+    "config_body": "collect_interval=0&report_interval=60&reset_day=1&schema_version=4&custom_ct=gd-ct-dualstack.ip.zstaticcdn.com&custom_cu=gd-cu-dualstack.ip.zstaticcdn.com&custom_cm=gd-cm-dualstack.ip.zstaticcdn.com&custom_bd=&interface=&connection_mode=auto",
     "payload": {
       "collect_interval": 0,
       "report_interval": 60,
       "reset_day": 1,
-      "schema_version": 3,
+      "schema_version": 4,
       "custom_ct": "gd-ct-dualstack.ip.zstaticcdn.com",
       "custom_cu": "gd-cu-dualstack.ip.zstaticcdn.com",
       "custom_cm": "gd-cm-dualstack.ip.zstaticcdn.com",
       "custom_bd": "",
       "interface": "",
+      "connection_mode": "auto",
       "config_md5": "b4d7c0d..."
     }
   }
@@ -450,7 +451,8 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
 **WebSocket 计费注意**
 
 - 建立 `wss://.../update` 连接需要一次 `GET + Upgrade`，该握手按一次 Workers request 计入。
-- 连接建立后的上报消息不再按 Workers request 逐条计入；它们作为 Durable Objects WebSocket incoming messages 计量，Cloudflare 计费口径按 `20:1` 折算为 DO requests。
+- 连接建立后的 Agent 上报消息由 Durable Object 标准 WebSocket API 接收，不使用 Hibernation API 接管 `/update` 连接；它们作为 Durable Objects WebSocket incoming messages 计量，Cloudflare 计费口径按 `20:1` 折算为 DO requests。
+- 该模式避免高频 Agent 指标消息表现为 hibernation wakeup，但只要 Agent 长连接存在，DO 会保持非休眠状态并产生 duration（GB-s）。前端订阅 `/api/ws` 仍使用 WebSocket Hibernation API。
 - 因此，Agent 应保持长连接；不要每次采样都断开重连。错误 `id` / `secret` 当前在 DO 消息阶段返回错误帧并关闭，避免每次上报都走 Worker 401。
 
 **副作用**
@@ -1163,7 +1165,7 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled` 或
 }
 ```
 
-> ~~响应会返回日期、套餐限额、剩余额度、数据库数量和 Account ID。~~ **2026-07-26 修订**：当前返回两个时间范围的 `rowsRead`、`rowsWritten`、`workersRequests`、`durableObjectsRequests`、`durableObjectsDuration`；额度由前端自行展示，不属于 API 响应。`durableObjectsDuration` 单位为 GB-s。**2026-08-14 修订**：`durableObjectsRequests` 为按 WebSocket incoming message `20:1` 计费规则折算的估算值，`durableObjectsRawRequests` 为 Cloudflare GraphQL 返回的原始 Durable Objects request 指标。由于 Cloudflare 聚合指标无法精确区分 hibernation WebSocket message 与普通 DO HTTP/RPC/alarm request，该折算适用于本项目 WSS 消息占主导的场景，不是 Cloudflare 账单的逐项精确复刻。
+> ~~响应会返回日期、套餐限额、剩余额度、数据库数量和 Account ID。~~ **2026-07-26 修订**：当前返回两个时间范围的 `rowsRead`、`rowsWritten`、`workersRequests`、`durableObjectsRequests`、`durableObjectsDuration`；额度由前端自行展示，不属于 API 响应。`durableObjectsDuration` 单位为 GB-s。**2026-08-14 修订**：`durableObjectsRequests` 为按 WebSocket incoming message `20:1` 计费规则折算的估算值，`durableObjectsRawRequests` 为 Cloudflare GraphQL 返回的原始 Durable Objects request 指标。当前 `/update` Agent WSS 使用标准 DO WebSocket API 接收；由于 Cloudflare 聚合指标仍无法精确区分 WebSocket message 与普通 DO HTTP/RPC/alarm/hibernation request，该折算适用于本项目 WSS 消息占主导的场景，不是 Cloudflare 账单的逐项精确复刻。
 >
 > **统计窗口**：`today` 为 UTC 当日 `00:00:00` 至 `23:59:59`；`yesterday` 为 UTC 昨日 `00:00:00` 至 `23:59:59`。
 

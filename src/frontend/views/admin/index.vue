@@ -230,6 +230,7 @@
         :install-gh-proxy="installGhProxy"
         :collect-interval="collectInterval"
         :report-interval="reportInterval"
+        :connection-mode="connectionMode"
         :custom-ct="customCt"
         :custom-cu="customCu"
         :custom-cm="customCm"
@@ -838,6 +839,7 @@ const editForm = ref({
   reset_day: 1,
   collect_interval: 0,
   report_interval: 60,
+  connection_mode: 'auto',
   custom_ct: '',
   custom_cu: '',
   custom_cm: '',
@@ -886,6 +888,7 @@ const targetOs = ref('linux')
 const installGhProxy = ref('')
 const collectInterval = ref(0)
 const reportInterval = ref(60)
+const connectionMode = ref('auto')
 const customCt = ref('')
 const customCu = ref('')
 const customCm = ref('')
@@ -1391,6 +1394,7 @@ const copyCmd = (serverId) => {
   installGhProxy.value = ''
   collectInterval.value = server?.collect_interval ?? 0
   reportInterval.value = server?.report_interval || 60
+  connectionMode.value = server?.connection_mode === 'http' ? 'http' : 'auto'
   customCt.value = server?.custom_ct || settings.value.custom_ct
   customCu.value = server?.custom_cu || settings.value.custom_cu
   customCm.value = server?.custom_cm || settings.value.custom_cm
@@ -1428,6 +1432,7 @@ const getCustomInstallCommand = () => {
       `-url='${HOST}/update'`,
       `-collect_interval='${collectInterval.value}'`,
       `-interval='${reportInterval.value}'`,
+      `-connection_mode='${connectionMode.value === 'http' ? 'http' : 'auto'}'`,
       `-reset_day='${resetDay.value ?? 1}'`,
       `-auto_update='${autoUpdateFlag}'`
     )
@@ -1449,6 +1454,7 @@ const getCustomInstallCommand = () => {
     `-url=${HOST}/update`,
     `-collect_interval=${collectInterval.value}`,
     `-interval=${reportInterval.value}`,
+    `-connection_mode=${connectionMode.value === 'http' ? 'http' : 'auto'}`,
     `-reset_day=${resetDay.value ?? 1}`,
     `-auto_update=${autoUpdateFlag}`
   )
@@ -1522,6 +1528,7 @@ const openEditModal = (server) => {
     reset_day: server.reset_day ?? 1,
     collect_interval: server.collect_interval ?? 0,
     report_interval: server.report_interval || 60,
+    connection_mode: server.connection_mode === 'http' ? 'http' : 'auto',
     custom_ct: server.custom_ct || '',
     custom_cu: server.custom_cu || '',
     custom_cm: server.custom_cm || '',
@@ -1607,6 +1614,7 @@ const saveEdit = async () => {
     reset_day: editForm.value.reset_day,
     collect_interval: editForm.value.collect_interval,
     report_interval: editForm.value.report_interval,
+    connection_mode: editForm.value.connection_mode === 'http' ? 'http' : 'auto',
     custom_ct: pingNodeValidation.values.custom_ct,
     custom_cu: pingNodeValidation.values.custom_cu,
     custom_cm: pingNodeValidation.values.custom_cm,

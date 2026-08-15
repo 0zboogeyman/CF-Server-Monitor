@@ -8,14 +8,14 @@ import { AppError, createSuccessResponse, createBadRequestResponse, createUnauth
 import { addServerColumns } from '../database/updateDatabase.js';
 import { clearResourceAlertState, sendNotification } from '../services/notification.js';
 import { getNextServerHistoryPartitionId, HISTORY_MAX_PARTITION_ID } from '../database/indexOptimization.js';
-import { isValidTrafficCorrection, validateAgentConfigInput, validatePingNode, validateNetworkInterfaces } from '../utils/agentConfig.js';
+import { isValidTrafficCorrection, normalizeConnectionMode, validateAgentConfigInput, validatePingNode, validateNetworkInterfaces } from '../utils/agentConfig.js';
 import { scheduleAgentConfigChanged } from '../utils/agentConfigNotify.js';
 import { detectBillingCycle, detectCurrencySymbol, normalizeBillingCycle, normalizeCurrency, normalizePrice, renewExpireDateIfNeeded } from '../utils/serverBilling.js';
 
 const PING_NODE_FIELDS = ['custom_ct', 'custom_cu', 'custom_cm', 'custom_bd'];
 const THEME_PREVIEW_AUTH_COOKIE = 'cfsm_theme_preview_auth';
 const THEME_PREVIEW_AUTH_TTL = 600;
-const DURABLE_OBJECTS_WEBSOCKET_MESSAGE_BILLING_RATIO = 19;
+const DURABLE_OBJECTS_WEBSOCKET_MESSAGE_BILLING_RATIO = 20;
 
 function normalizeBooleanFlag(value) {
   return value === true || value === 1 || value === '1' || value === 'true' ? '1' : '0';
@@ -773,14 +773,15 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
       });
     }
     else if (data.action === 'edit') {
-      const { id, name, server_group, region, tags, note, price, billing_cycle, auto_renewal, currency, expire_date, traffic_limit, traffic_calc_type, interface: networkInterfaceInput, reset_day, collect_interval, report_interval, auto_update, custom_ct, custom_cu, custom_cm, custom_bd, rx_correction, tx_correction, offline_notify_disabled, is_hidden } = data;
+      const { id, name, server_group, region, tags, note, price, billing_cycle, auto_renewal, currency, expire_date, traffic_limit, traffic_calc_type, interface: networkInterfaceInput, reset_day, collect_interval, report_interval, connection_mode, auto_update, custom_ct, custom_cu, custom_cm, custom_bd, rx_correction, tx_correction, offline_notify_disabled, is_hidden } = data;
       if (!id || !isValidUUID(id)) {
         return createBadRequestResponse('invalidServerId');
       }
       const agentConfigResult = validateAgentConfigInput({
         collect_interval,
         report_interval,
-        reset_day
+        reset_day,
+        connection_mode
       });
       if (!agentConfigResult.valid) {
         return createBadRequestResponse(agentConfigResult.error);
@@ -824,7 +825,7 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
       try {
         await env.DB.prepare(`
           UPDATE servers
-          SET name = ?, server_group = ?, region = ?, tags = ?, note = ?, price = ?, billing_cycle = ?, auto_renewal = ?, currency = ?, expire_date = ?, traffic_limit = ?, traffic_calc_type = ?, "interface" = ?, reset_day = ?, collect_interval = ?, report_interval = ?, auto_update = ?, custom_ct = ?, custom_cu = ?, custom_cm = ?, custom_bd = ?, rx_correction = ?, tx_correction = ?, offline_notify_disabled = ?, is_hidden = ?
+          SET name = ?, server_group = ?, region = ?, tags = ?, note = ?, price = ?, billing_cycle = ?, auto_renewal = ?, currency = ?, expire_date = ?, traffic_limit = ?, traffic_calc_type = ?, "interface" = ?, reset_day = ?, collect_interval = ?, report_interval = ?, connection_mode = ?, auto_update = ?, custom_ct = ?, custom_cu = ?, custom_cm = ?, custom_bd = ?, rx_correction = ?, tx_correction = ?, offline_notify_disabled = ?, is_hidden = ?
           WHERE id = ?
         `).bind(
           name || '',
@@ -843,6 +844,7 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
           normalizedAgentConfig.reset_day,
           normalizedAgentConfig.collect_interval,
           normalizedAgentConfig.report_interval,
+          normalizedAgentConfig.connection_mode,
           normalizeBooleanFlag(auto_update),
           pingNodes.values.custom_ct,
           pingNodes.values.custom_cu,
@@ -964,10 +966,10 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
           await env.DB.prepare(`
             INSERT INTO servers (id, name, server_group, region, tags, note, price, billing_cycle, auto_renewal,
               currency, expire_date,
-              traffic_limit, traffic_calc_type, "interface", reset_day, collect_interval, report_interval,
+              traffic_limit, traffic_calc_type, "interface", reset_day, collect_interval, report_interval, connection_mode,
               auto_update, custom_ct, custom_cu, custom_cm, custom_bd, rx_correction, tx_correction,
               offline_notify_disabled, is_hidden, sort_order, history_partition_id, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).bind(
             server.id,
             server.name || '',
@@ -986,6 +988,7 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
             server.reset_day ?? 1,
             server.collect_interval ?? 0,
             server.report_interval ?? 60,
+            normalizeConnectionMode(server.connection_mode) || 'auto',
             normalizeBooleanFlag(server.auto_update),
             server.custom_ct || '',
             server.custom_cu || '',

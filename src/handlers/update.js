@@ -17,9 +17,9 @@ import {
 import {
   AGENT_CONFIG_MD5_HEADER,
   AGENT_CONFIG_SCHEMA_HEADER,
-  AGENT_CONFIG_SCHEMA_VERSION,
   describeAgentConfig,
   isValidTrafficCorrection,
+  normalizeAgentConfigSchemaVersion,
   serializeCorrection
 } from '../utils/agentConfig.js';
 import { scheduleAgentConfigChanged } from '../utils/agentConfigNotify.js';
@@ -542,8 +542,8 @@ export async function handleUpdate(request, env, ctx) {
     queueBroadcastSamples(id, broadcastSamples);
     ctx.waitUntil(_ensureBatchFlush(env));
 
-    const clientConfigSchema = request.headers.get(AGENT_CONFIG_SCHEMA_HEADER);
-    if (clientConfigSchema !== String(AGENT_CONFIG_SCHEMA_VERSION)) {
+    const clientConfigSchema = normalizeAgentConfigSchemaVersion(request.headers.get(AGENT_CONFIG_SCHEMA_HEADER));
+    if (!clientConfigSchema) {
       return new Response('OK', {
         status: 200,
         headers: { 'Content-Type': 'text/plain; charset=utf-8' }
@@ -552,13 +552,13 @@ export async function handleUpdate(request, env, ctx) {
 
     try {
       const settings = await loadSiteSettings(env.DB);
-      const descriptor = await describeAgentConfig(serverDetail, settings);
+      const descriptor = await describeAgentConfig(serverDetail, settings, clientConfigSchema);
       const clientConfigMd5 = (request.headers.get(AGENT_CONFIG_MD5_HEADER) || '').trim().toLowerCase();
       const hasCorrection = descriptor.correction !== null;
       const md5Changed = clientConfigMd5 !== descriptor.md5;
       const responseHeaders = {
         'Cache-Control': 'no-store',
-        [AGENT_CONFIG_SCHEMA_HEADER]: String(AGENT_CONFIG_SCHEMA_VERSION),
+        [AGENT_CONFIG_SCHEMA_HEADER]: String(clientConfigSchema),
         [AGENT_CONFIG_MD5_HEADER]: descriptor.md5
       };
 

@@ -25,21 +25,28 @@ function makeBroadcaster(webSockets = [], env = { DB: {} }) {
   }, env);
 }
 
-function makeDescriptor(md5 = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb') {
+function makeDescriptor(md5 = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', schemaVersion = 4) {
+  const serialized = schemaVersion >= 4
+    ? `collect_interval=0&report_interval=60&reset_day=1&schema_version=${schemaVersion}&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=&connection_mode=auto`
+    : `collect_interval=0&report_interval=60&reset_day=1&schema_version=${schemaVersion}&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=`;
+  const config = {
+    collect_interval: 0,
+    report_interval: 60,
+    reset_day: 1,
+    schema_version: schemaVersion,
+    custom_ct: '',
+    custom_cu: '',
+    custom_cm: '',
+    custom_bd: '',
+    interface: ''
+  };
+  if (schemaVersion >= 4) {
+    config.connection_mode = 'auto';
+  }
   return {
-    serialized: 'collect_interval=0&report_interval=60&reset_day=1&schema_version=3&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=',
+    serialized,
     md5,
-    config: {
-      collect_interval: 0,
-      report_interval: 60,
-      reset_day: 1,
-      schema_version: 3,
-      custom_ct: '',
-      custom_cu: '',
-      custom_cm: '',
-      custom_bd: '',
-      interface: ''
-    },
+    config,
     correction: null
   };
 }
@@ -54,6 +61,50 @@ test('WSS agent config state only requests ack for fields in current report', ()
     broadcaster._getAgentConfigState({ config_md5: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }, { configSchema: '3', configMd5: 'none' }),
     { schema: '3', md5: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', requested: true }
   );
+});
+
+test('WSS agent standard WebSocket adapter preserves attachment state', async () => {
+  const broadcaster = makeBroadcaster();
+  const listeners = {};
+  const sent = [];
+  let accepted = false;
+  const server = {
+    accept() {
+      accepted = true;
+    },
+    send(message) {
+      sent.push(message);
+    },
+    close() {},
+    addEventListener(type, handler) {
+      listeners[type] = handler;
+    }
+  };
+
+  let finish;
+  const handled = new Promise(resolve => {
+    finish = resolve;
+  });
+  broadcaster._handleAgentReportMessage = async (ws, rawMessage, attachment) => {
+    assert.equal(rawMessage, '{"metrics":{}}');
+    assert.equal(attachment.kind, 'agent-report');
+    ws.serializeAttachment({ ...attachment, authenticated: true, serverId: 'server-1' });
+    ws.send('ok');
+    finish();
+  };
+
+  const ws = broadcaster._acceptStandardAgentWebSocket(server, { kind: 'agent-report' });
+  assert.equal(accepted, true);
+  assert.equal(broadcaster.standardAgentWebSocketCount, 1);
+
+  listeners.message({ data: '{"metrics":{}}' });
+  await handled;
+
+  assert.equal(ws.deserializeAttachment().serverId, 'server-1');
+  assert.deepEqual(sent, ['ok']);
+
+  listeners.close();
+  assert.equal(broadcaster.standardAgentWebSocketCount, 0);
 });
 
 test('WSS agent ack suggests realtime or idle report interval', () => {
@@ -100,7 +151,7 @@ test('WSS agent context uses current report interval from payload', async () => 
     serverId: 'server-1',
     historyPartitionId: 42,
     reportIntervalMs: 60000,
-    configSchema: '3',
+    configSchema: '4',
     configMd5: 'none'
   }, {
     id: 'server-1',
@@ -125,7 +176,7 @@ test('WSS agent config ack is skipped when report omits config state', async () 
       configMd5: 'none'
     },
     serverId: 'server-1',
-    agentConfig: { schema: '3', md5: 'none', requested: false }
+    agentConfig: { schema: '4', md5: 'none', requested: false }
   });
 
   assert.equal(loads, 0);
@@ -143,7 +194,7 @@ test('WSS agent config ack is built when report includes config state', async ()
   const ack = await broadcaster._buildAgentConfigAck({
     attachment: {},
     serverId: 'server-1',
-    agentConfig: { schema: '3', md5: 'none', requested: true }
+    agentConfig: { schema: '4', md5: 'none', requested: true }
   });
 
   assert.equal(loads, 1);
@@ -152,6 +203,7 @@ test('WSS agent config ack is built when report includes config state', async ()
   assert.equal(ack.body, makeDescriptor().serialized);
   assert.equal(ack.config_body, makeDescriptor().serialized);
   assert.equal(ack.payload.report_interval, 60);
+  assert.equal(ack.payload.connection_mode, 'auto');
   assert.equal(Object.prototype.hasOwnProperty.call(ack, 'config'), false);
 });
 
@@ -163,7 +215,7 @@ test('WSS agent config push uses string body and structured payload', () => {
         kind: 'agent-report',
         authenticated: true,
         serverId: 'server-1',
-        configSchema: '3',
+        configSchema: '4',
         configMd5: 'none'
       };
     },
@@ -181,7 +233,38 @@ test('WSS agent config push uses string body and structured payload', () => {
   assert.equal(sent[0].body, makeDescriptor().serialized);
   assert.equal(sent[0].config_body, makeDescriptor().serialized);
   assert.equal(sent[0].payload.report_interval, 60);
+  assert.equal(sent[0].payload.connection_mode, 'auto');
   assert.equal(Object.prototype.hasOwnProperty.call(sent[0], 'config'), false);
+});
+
+test('WSS agent config push keeps legacy schema without connection mode', () => {
+  const sent = [];
+  const ws = {
+    deserializeAttachment() {
+      return {
+        kind: 'agent-report',
+        authenticated: true,
+        serverId: 'server-1',
+        configSchema: '3',
+        configMd5: 'none'
+      };
+    },
+    send(message) {
+      sent.push(JSON.parse(message));
+    }
+  };
+  const broadcaster = makeBroadcaster([ws]);
+  const descriptors = new Map([
+    [4, makeDescriptor('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 4)],
+    [3, makeDescriptor('cccccccccccccccccccccccccccccccc', 3)]
+  ]);
+
+  const result = broadcaster._pushAgentConfigFrame('server-1', descriptors);
+
+  assert.deepEqual(result, { matched: 1, delivered: 1 });
+  assert.equal(sent[0].config_schema, 3);
+  assert.equal(sent[0].body, makeDescriptor('cccccccccccccccccccccccccccccccc', 3).serialized);
+  assert.equal(Object.prototype.hasOwnProperty.call(sent[0].payload, 'connection_mode'), false);
 });
 
 test('resource alert rule batches are capped at 20 rules', () => {
