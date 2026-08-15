@@ -120,7 +120,7 @@ test('WSS agent ack suggests realtime or idle report interval', () => {
       resourceAlertActive: true,
       realtimeActive: true
     }),
-    4000
+    60000
   );
   assert.equal(
     broadcaster._getAgentNextWssReportAfterMs(120000, {
@@ -128,7 +128,7 @@ test('WSS agent ack suggests realtime or idle report interval', () => {
       resourceAlertActive: true,
       realtimeActive: true
     }),
-    16000
+    120000
   );
   assert.equal(
     broadcaster._getAgentNextWssReportAfterMs(60000, {

@@ -364,7 +364,15 @@
                 </div>
                 <div class="quota-progress-item">
                   <div class="flex-justify-between text-sm mb-1">
-                    <span>{{ trans.durableObjectsDuration }}：{{ formatNumber(d1UsageResult.usage.today.durableObjectsDuration, 2) }} / {{ formatNumber(13000) }}</span>
+                    <span class="quota-label-with-help">
+                      <span>{{ trans.durableObjectsDuration }}：{{ formatNumber(d1UsageResult.usage.today.durableObjectsDuration, 2) }} / {{ formatNumber(13000) }}</span>
+                      <span class="quota-help" tabindex="0" :aria-label="trans.durableObjectsDurationTip">
+                        <span class="quota-help-dot" aria-hidden="true">?</span>
+                        <span class="quota-help-tooltip" role="tooltip">
+                          <span class="quota-help-row">{{ trans.durableObjectsDurationTip }}</span>
+                        </span>
+                      </span>
+                    </span>
                     <span>{{ getUsagePercent(d1UsageResult.usage.today.durableObjectsDuration, 13000) }}%</span>
                   </div>
                   <div class="quota-progress-bar">
@@ -426,7 +434,15 @@
                 </div>
                 <div class="quota-progress-item">
                   <div class="flex-justify-between text-sm mb-1">
-                    <span>{{ trans.durableObjectsDuration }}：{{ formatNumber(d1UsageResult.usage.yesterday.durableObjectsDuration, 2) }} / {{ formatNumber(13000) }}</span>
+                    <span class="quota-label-with-help">
+                      <span>{{ trans.durableObjectsDuration }}：{{ formatNumber(d1UsageResult.usage.yesterday.durableObjectsDuration, 2) }} / {{ formatNumber(13000) }}</span>
+                      <span class="quota-help" tabindex="0" :aria-label="trans.durableObjectsDurationTip">
+                        <span class="quota-help-dot" aria-hidden="true">?</span>
+                        <span class="quota-help-tooltip" role="tooltip">
+                          <span class="quota-help-row">{{ trans.durableObjectsDurationTip }}</span>
+                        </span>
+                      </span>
+                    </span>
                     <span>{{ getUsagePercent(d1UsageResult.usage.yesterday.durableObjectsDuration, 13000) }}%</span>
                   </div>
                   <div class="quota-progress-bar">

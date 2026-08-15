@@ -46,6 +46,7 @@ const ALLOWED_AGENT_REPORT_INTERVALS = new Set([30, 60, 120, 180]);
 const AGENT_SERVER_DETAIL_TTL_MS = 120 * 1000;
 const AGENT_REALTIME_REPORT_DIVISOR = 15;
 const IDLE_AGENT_WSS_REPORT_INTERVAL_MULTIPLIER = 2;
+const RESOURCE_ALERT_AGENT_REPORT_INTERVAL_MS = 60 * 1000;
 const LATEST_REPORT_TTL_MS = 5 * 60 * 1000;
 const MAX_LATEST_REPORT_SERVERS = 1000;
 const RESOURCE_ALERT_STORAGE_KEY = 'resource_alert_windows_v1';
@@ -1062,9 +1063,13 @@ export class MetricsBroadcaster {
       1000,
       Math.ceil((historyIntervalMs / 1000) / AGENT_REALTIME_REPORT_DIVISOR) * 1000
     );
-    return state.frontendActive
-      ? realtimeIntervalMs
-      : realtimeIntervalMs * IDLE_AGENT_WSS_REPORT_INTERVAL_MULTIPLIER;
+    if (state.frontendActive) return realtimeIntervalMs;
+
+    if (state.resourceAlertActive) {
+      return Math.max(historyIntervalMs, RESOURCE_ALERT_AGENT_REPORT_INTERVAL_MS);
+    }
+
+    return realtimeIntervalMs * IDLE_AGENT_WSS_REPORT_INTERVAL_MULTIPLIER;
   }
 
   async _getAgentHintReportIntervalMs(attachment) {
