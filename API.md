@@ -1144,8 +1144,12 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled` 或
       "rowsRead": 12345,
       "rowsWritten": 678,
       "workersRequests": 1234,
-      "durableObjectsRequests": 345,
-      "durableObjectsRawRequests": 6900,
+      "durableObjectsRequests": 1420,
+      "durableObjectsHttpRequests": 1000,
+      "durableObjectsHibernationWakeups": 400,
+      "durableObjectsInboundWebSocketMessages": 400,
+      "durableObjectsOutboundWebSocketMessages": 6900,
+      "durableObjectsRawRequests": 1400,
       "durableObjectsRequestsEstimated": true,
       "durableObjectsRequestBillingRatio": 20,
       "durableObjectsDuration": 12.34
@@ -1154,8 +1158,12 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled` 或
       "rowsRead": 23456,
       "rowsWritten": 789,
       "workersRequests": 2345,
-      "durableObjectsRequests": 456,
-      "durableObjectsRawRequests": 9120,
+      "durableObjectsRequests": 2630,
+      "durableObjectsHttpRequests": 2000,
+      "durableObjectsHibernationWakeups": 600,
+      "durableObjectsInboundWebSocketMessages": 600,
+      "durableObjectsOutboundWebSocketMessages": 9120,
+      "durableObjectsRawRequests": 2600,
       "durableObjectsRequestsEstimated": true,
       "durableObjectsRequestBillingRatio": 20,
       "durableObjectsDuration": 23.45
@@ -1165,7 +1173,7 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled` 或
 }
 ```
 
-> ~~响应会返回日期、套餐限额、剩余额度、数据库数量和 Account ID。~~ **2026-07-26 修订**：当前返回两个时间范围的 `rowsRead`、`rowsWritten`、`workersRequests`、`durableObjectsRequests`、`durableObjectsDuration`；额度由前端自行展示，不属于 API 响应。`durableObjectsDuration` 单位为 GB-s。**2026-08-14 修订**：`durableObjectsRequests` 为按 WebSocket incoming message `20:1` 计费规则折算的估算值，`durableObjectsRawRequests` 为 Cloudflare GraphQL 返回的原始 Durable Objects request 指标。当前 `/update` Agent WSS 使用标准 DO WebSocket API 接收；由于 Cloudflare 聚合指标仍无法精确区分 WebSocket message 与普通 DO HTTP/RPC/alarm/hibernation request，该折算适用于本项目 WSS 消息占主导的场景，不是 Cloudflare 账单的逐项精确复刻。
+> ~~响应会返回日期、套餐限额、剩余额度、数据库数量和 Account ID。~~ **2026-07-26 修订**：当前返回两个时间范围的 `rowsRead`、`rowsWritten`、`workersRequests`、`durableObjectsRequests`、`durableObjectsDuration`；额度由前端自行展示，不属于 API 响应。`durableObjectsDuration` 单位为 GB-s。**2026-08-15 修订**：`durableObjectsRequests` 为计费请求数估算值：`durableObjectsHttpRequests` 与 `durableObjectsHibernationWakeups` 按 `1:1` 计入，`durableObjectsInboundWebSocketMessages` 按 `20:1` 折算计入，`durableObjectsOutboundWebSocketMessages` 仅返回数量但不计入请求计费。`durableObjectsRawRequests` 为 `durableObjectsInvocationsAdaptiveGroups` 返回的原始 Durable Objects invocation request 总数，包含 HTTP/升级请求与 Hibernation 唤醒。
 >
 > **统计窗口**：`today` 为 UTC 当日 `00:00:00` 至 `23:59:59`；`yesterday` 为 UTC 昨日 `00:00:00` 至 `23:59:59`。
 

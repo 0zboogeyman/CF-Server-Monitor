@@ -321,7 +321,7 @@
                     <span>{{ getUsagePercent(d1UsageResult.usage.today.rowsRead, 5000000) }}%</span>
                   </div>
                   <div class="quota-progress-bar">
-                    <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.today.rowsRead, 5000000) + '%' }"></div>
+                    <div class="quota-progress-fill" :style="{ width: getUsageBarPercent(d1UsageResult.usage.today.rowsRead, 5000000) + '%' }"></div>
                   </div>
                 </div>
                 <div class="quota-progress-item">
@@ -330,7 +330,7 @@
                     <span>{{ getUsagePercent(d1UsageResult.usage.today.rowsWritten, 100000) }}%</span>
                   </div>
                   <div class="quota-progress-bar">
-                    <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.today.rowsWritten, 100000) + '%' }"></div>
+                    <div class="quota-progress-fill" :style="{ width: getUsageBarPercent(d1UsageResult.usage.today.rowsWritten, 100000) + '%' }"></div>
                   </div>
                 </div>
                 <div class="quota-progress-item">
@@ -339,16 +339,27 @@
                     <span>{{ getUsagePercent(d1UsageResult.usage.today.workersRequests, 100000) }}%</span>
                   </div>
                   <div v-if="d1UsageResult.usage.today.workersRequests" class="quota-progress-bar">
-                    <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.today.workersRequests, 100000) + '%' }"></div>
+                    <div class="quota-progress-fill" :style="{ width: getUsageBarPercent(d1UsageResult.usage.today.workersRequests, 100000) + '%' }"></div>
                   </div>
                 </div>
                 <div class="quota-progress-item">
                   <div class="flex-justify-between text-sm mb-1">
-                    <span>{{ trans.durableObjectsRequests }}：{{ formatNumber(d1UsageResult.usage.today.durableObjectsRequests) }}{{ formatDurableObjectsRawRequests(d1UsageResult.usage.today) }} / {{ formatNumber(100000) }}</span>
+                    <span class="quota-label-with-help">
+                      <span>{{ trans.durableObjectsRequests }}：{{ formatNumber(d1UsageResult.usage.today.durableObjectsRequests) }} / {{ formatNumber(100000) }}</span>
+                      <span class="quota-help" tabindex="0" :aria-label="formatDurableObjectsUsageTooltip(d1UsageResult.usage.today)">
+                        <span class="quota-help-dot" aria-hidden="true">?</span>
+                        <span class="quota-help-tooltip" role="tooltip">
+                          <span v-for="row in getDurableObjectsUsageRows(d1UsageResult.usage.today)" :key="row.key" class="quota-help-row">
+                            <span class="quota-help-label">{{ row.label }}</span>
+                            <span class="quota-help-value">{{ row.value }}</span>
+                          </span>
+                        </span>
+                      </span>
+                    </span>
                     <span>{{ getUsagePercent(d1UsageResult.usage.today.durableObjectsRequests, 100000) }}%</span>
                   </div>
                   <div class="quota-progress-bar">
-                    <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.today.durableObjectsRequests, 100000) + '%' }"></div>
+                    <div class="quota-progress-fill" :style="{ width: getUsageBarPercent(d1UsageResult.usage.today.durableObjectsRequests, 100000) + '%' }"></div>
                   </div>
                 </div>
                 <div class="quota-progress-item">
@@ -357,7 +368,7 @@
                     <span>{{ getUsagePercent(d1UsageResult.usage.today.durableObjectsDuration, 13000) }}%</span>
                   </div>
                   <div class="quota-progress-bar">
-                    <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.today.durableObjectsDuration, 13000) + '%' }"></div>
+                    <div class="quota-progress-fill" :style="{ width: getUsageBarPercent(d1UsageResult.usage.today.durableObjectsDuration, 13000) + '%' }"></div>
                   </div>
                 </div>
               </div>
@@ -372,7 +383,7 @@
                     <span>{{ getUsagePercent(d1UsageResult.usage.yesterday.rowsRead, 5000000) }}%</span>
                   </div>
                   <div class="quota-progress-bar">
-                    <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.yesterday.rowsRead, 5000000) + '%' }"></div>
+                    <div class="quota-progress-fill" :style="{ width: getUsageBarPercent(d1UsageResult.usage.yesterday.rowsRead, 5000000) + '%' }"></div>
                   </div>
                 </div>
                 <div class="quota-progress-item">
@@ -381,7 +392,7 @@
                     <span>{{ getUsagePercent(d1UsageResult.usage.yesterday.rowsWritten, 100000) }}%</span>
                   </div>
                   <div class="quota-progress-bar">
-                    <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.yesterday.rowsWritten, 100000) + '%' }"></div>
+                    <div class="quota-progress-fill" :style="{ width: getUsageBarPercent(d1UsageResult.usage.yesterday.rowsWritten, 100000) + '%' }"></div>
                   </div>
                 </div>
                 <div v-if="d1UsageResult.usage.yesterday.workersRequests" class="quota-progress-item">
@@ -390,16 +401,27 @@
                     <span>{{ getUsagePercent(d1UsageResult.usage.yesterday.workersRequests, 100000) }}%</span>
                   </div>
                   <div class="quota-progress-bar">
-                    <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.yesterday.workersRequests, 100000) + '%' }"></div>
+                    <div class="quota-progress-fill" :style="{ width: getUsageBarPercent(d1UsageResult.usage.yesterday.workersRequests, 100000) + '%' }"></div>
                   </div>
                 </div>
                 <div class="quota-progress-item">
                   <div class="flex-justify-between text-sm mb-1">
-                    <span>{{ trans.durableObjectsRequests }}：{{ formatNumber(d1UsageResult.usage.yesterday.durableObjectsRequests) }}{{ formatDurableObjectsRawRequests(d1UsageResult.usage.yesterday) }} / {{ formatNumber(100000) }}</span>
+                    <span class="quota-label-with-help">
+                      <span>{{ trans.durableObjectsRequests }}：{{ formatNumber(d1UsageResult.usage.yesterday.durableObjectsRequests) }} / {{ formatNumber(100000) }}</span>
+                      <span class="quota-help" tabindex="0" :aria-label="formatDurableObjectsUsageTooltip(d1UsageResult.usage.yesterday)">
+                        <span class="quota-help-dot" aria-hidden="true">?</span>
+                        <span class="quota-help-tooltip" role="tooltip">
+                          <span v-for="row in getDurableObjectsUsageRows(d1UsageResult.usage.yesterday)" :key="row.key" class="quota-help-row">
+                            <span class="quota-help-label">{{ row.label }}</span>
+                            <span class="quota-help-value">{{ row.value }}</span>
+                          </span>
+                        </span>
+                      </span>
+                    </span>
                     <span>{{ getUsagePercent(d1UsageResult.usage.yesterday.durableObjectsRequests, 100000) }}%</span>
                   </div>
                   <div class="quota-progress-bar">
-                    <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.yesterday.durableObjectsRequests, 100000) + '%' }"></div>
+                    <div class="quota-progress-fill" :style="{ width: getUsageBarPercent(d1UsageResult.usage.yesterday.durableObjectsRequests, 100000) + '%' }"></div>
                   </div>
                 </div>
                 <div class="quota-progress-item">
@@ -408,7 +430,7 @@
                     <span>{{ getUsagePercent(d1UsageResult.usage.yesterday.durableObjectsDuration, 13000) }}%</span>
                   </div>
                   <div class="quota-progress-bar">
-                    <div class="quota-progress-fill" :style="{ width: getUsagePercent(d1UsageResult.usage.yesterday.durableObjectsDuration, 13000) + '%' }"></div>
+                    <div class="quota-progress-fill" :style="{ width: getUsageBarPercent(d1UsageResult.usage.yesterday.durableObjectsDuration, 13000) + '%' }"></div>
                   </div>
                 </div>
               </div>
@@ -702,15 +724,39 @@ const parseThemeOptions = (value) => {
 const formatNumber = (value, maximumFractionDigits = 0) => (
   Number(value || 0).toLocaleString(undefined, { maximumFractionDigits })
 )
-const formatDurableObjectsRawRequests = (usage = {}) => {
-  const raw = Number(usage.durableObjectsRawRequests || 0)
-  const estimated = Number(usage.durableObjectsRequests || 0)
-  if (!raw || raw === estimated) return ''
-  return ` (${trans.value.rawRequests || 'raw'}: ${formatNumber(raw)})`
-}
+const getDurableObjectsUsageRows = (usage = {}) => ([
+  {
+    key: 'http',
+    label: trans.value.durableObjectsHttpRequests,
+    value: `${formatNumber(usage.durableObjectsHttpRequests)} · ${trans.value.billingRatioOneToOne}`
+  },
+  {
+    key: 'hibernation',
+    label: trans.value.durableObjectsHibernationWakeups,
+    value: `${formatNumber(usage.durableObjectsHibernationWakeups)} · ${trans.value.billingRatioOneToOne}`
+  },
+  {
+    key: 'inbound-ws',
+    label: trans.value.durableObjectsInboundWebSocketMessages,
+    value: `${formatNumber(usage.durableObjectsInboundWebSocketMessages)} · ${trans.value.billingRatioWebSocketIncoming}`
+  },
+  {
+    key: 'outbound-ws',
+    label: trans.value.durableObjectsOutboundWebSocketMessages,
+    value: `${formatNumber(usage.durableObjectsOutboundWebSocketMessages)} · ${trans.value.billingRatioNotBilled}`
+  }
+])
+const formatDurableObjectsUsageTooltip = (usage = {}) => (
+  getDurableObjectsUsageRows(usage)
+    .map(row => `${row.label}: ${row.value}`)
+    .join('\n')
+)
 const getUsagePercent = (used, limit) => {
   if (!limit) return 0
-  return Math.min(100, Number(((Number(used || 0) / Number(limit)) * 100).toFixed(2)))
+  return Number(((Number(used || 0) / Number(limit)) * 100).toFixed(2))
+}
+const getUsageBarPercent = (used, limit) => {
+  return Math.min(100, Math.max(0, getUsagePercent(used, limit)))
 }
 
 const isMultipleMode = computed(() => hasMultipleApiBases())

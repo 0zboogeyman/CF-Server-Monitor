@@ -17,6 +17,17 @@ const THEME_PREVIEW_AUTH_COOKIE = 'cfsm_theme_preview_auth';
 const THEME_PREVIEW_AUTH_TTL = 600;
 const DURABLE_OBJECTS_WEBSOCKET_MESSAGE_BILLING_RATIO = 20;
 
+function toUsageNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : 0;
+}
+
+function isDurableObjectsHibernationInvocationType(value) {
+  const type = String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  if (!type) return false;
+  return type.includes('hibernation') || (type.includes('websocket') && type.includes('message'));
+}
+
 function normalizeBooleanFlag(value) {
   return value === true || value === 1 || value === '1' || value === 'true' ? '1' : '0';
 }
@@ -267,10 +278,53 @@ async function cloudflareGraphql(query, variables, token) {
   return data.data;
 }
 
-export function estimateDurableObjectsBillableRequests(rawRequests) {
-  const requests = Number(rawRequests) || 0;
-  if (requests <= 0) return 0;
-  return Math.ceil(requests / DURABLE_OBJECTS_WEBSOCKET_MESSAGE_BILLING_RATIO);
+function estimateDurableObjectsWebSocketBillableRequests(messages) {
+  const count = toUsageNumber(messages);
+  if (count <= 0) return 0;
+  return Math.ceil(count / DURABLE_OBJECTS_WEBSOCKET_MESSAGE_BILLING_RATIO);
+}
+
+export function estimateDurableObjectsBillableRequests(breakdown = {}) {
+  if (breakdown === null || typeof breakdown !== 'object') {
+    return estimateDurableObjectsWebSocketBillableRequests(breakdown);
+  }
+
+  const httpRequests = toUsageNumber(breakdown.httpRequests);
+  const hibernationWakeups = toUsageNumber(breakdown.hibernationWakeups);
+  const inboundWebSocketMessages = toUsageNumber(breakdown.inboundWebSocketMessages);
+
+  return Math.ceil(httpRequests) +
+    Math.ceil(hibernationWakeups) +
+    estimateDurableObjectsWebSocketBillableRequests(inboundWebSocketMessages);
+}
+
+export function summarizeDurableObjectsUsage(invocationGroups = [], periodicGroups = []) {
+  const summary = {
+    httpRequests: 0,
+    hibernationWakeups: 0,
+    inboundWebSocketMessages: 0,
+    outboundWebSocketMessages: 0,
+    rawRequests: 0,
+    billableRequests: 0
+  };
+
+  for (const group of invocationGroups || []) {
+    const requests = toUsageNumber(group?.sum?.requests);
+    summary.rawRequests += requests;
+    if (isDurableObjectsHibernationInvocationType(group?.dimensions?.type)) {
+      summary.hibernationWakeups += requests;
+    } else {
+      summary.httpRequests += requests;
+    }
+  }
+
+  for (const group of periodicGroups || []) {
+    summary.inboundWebSocketMessages += toUsageNumber(group?.sum?.inboundWebsocketMsgCount);
+    summary.outboundWebSocketMessages += toUsageNumber(group?.sum?.outboundWebsocketMsgCount);
+  }
+
+  summary.billableRequests = estimateDurableObjectsBillableRequests(summary);
+  return summary;
 }
 
 async function fetchCloudflareUsage(token, accountId, range) {
@@ -295,12 +349,13 @@ async function fetchCloudflareUsage(token, accountId, range) {
           filter: { date_geq: $start, date_leq: $end }
         ) {
           sum { requests }
+          dimensions { type }
         }
         durableObjectsPeriodicGroups(
           limit: 10000
           filter: { date_geq: $start, date_leq: $end }
         ) {
-          sum { duration }
+          sum { duration inboundWebsocketMsgCount outboundWebsocketMsgCount }
         }
       }
     }
@@ -322,10 +377,10 @@ async function fetchCloudflareUsage(token, accountId, range) {
   const workersRequests = (account.workersInvocationsAdaptive || []).reduce((total, group) => {
     return total + Number(group.sum?.requests || 0);
   }, 0);
-  const durableObjectsRawRequests = (account.durableObjectsInvocationsAdaptiveGroups || []).reduce((total, group) => {
-    return total + Number(group.sum?.requests || 0);
-  }, 0);
-  const durableObjectsRequests = estimateDurableObjectsBillableRequests(durableObjectsRawRequests);
+  const durableObjectsUsage = summarizeDurableObjectsUsage(
+    account.durableObjectsInvocationsAdaptiveGroups || [],
+    account.durableObjectsPeriodicGroups || []
+  );
   const durableObjectsDuration = (account.durableObjectsPeriodicGroups || []).reduce((total, group) => {
     return total + Number(group.sum?.duration || 0);
   }, 0);
@@ -333,8 +388,12 @@ async function fetchCloudflareUsage(token, accountId, range) {
     rowsRead: usage.rowsRead,
     rowsWritten: usage.rowsWritten,
     workersRequests,
-    durableObjectsRequests,
-    durableObjectsRawRequests,
+    durableObjectsRequests: durableObjectsUsage.billableRequests,
+    durableObjectsHttpRequests: durableObjectsUsage.httpRequests,
+    durableObjectsHibernationWakeups: durableObjectsUsage.hibernationWakeups,
+    durableObjectsInboundWebSocketMessages: durableObjectsUsage.inboundWebSocketMessages,
+    durableObjectsOutboundWebSocketMessages: durableObjectsUsage.outboundWebSocketMessages,
+    durableObjectsRawRequests: durableObjectsUsage.rawRequests,
     durableObjectsRequestsEstimated: true,
     durableObjectsRequestBillingRatio: DURABLE_OBJECTS_WEBSOCKET_MESSAGE_BILLING_RATIO,
     durableObjectsDuration,
@@ -359,6 +418,10 @@ async function getD1DailyUsage(token, accountId) {
     rowsWritten: yesterdayUsage.rowsWritten,
     workersRequests: yesterdayUsage.workersRequests,
     durableObjectsRequests: yesterdayUsage.durableObjectsRequests,
+    durableObjectsHttpRequests: yesterdayUsage.durableObjectsHttpRequests,
+    durableObjectsHibernationWakeups: yesterdayUsage.durableObjectsHibernationWakeups,
+    durableObjectsInboundWebSocketMessages: yesterdayUsage.durableObjectsInboundWebSocketMessages,
+    durableObjectsOutboundWebSocketMessages: yesterdayUsage.durableObjectsOutboundWebSocketMessages,
     durableObjectsRawRequests: yesterdayUsage.durableObjectsRawRequests,
     durableObjectsRequestsEstimated: yesterdayUsage.durableObjectsRequestsEstimated,
     durableObjectsRequestBillingRatio: yesterdayUsage.durableObjectsRequestBillingRatio,
@@ -371,6 +434,10 @@ async function getD1DailyUsage(token, accountId) {
       rowsWritten: todayUsage.rowsWritten,
       workersRequests: todayUsage.workersRequests,
       durableObjectsRequests: todayUsage.durableObjectsRequests,
+      durableObjectsHttpRequests: todayUsage.durableObjectsHttpRequests,
+      durableObjectsHibernationWakeups: todayUsage.durableObjectsHibernationWakeups,
+      durableObjectsInboundWebSocketMessages: todayUsage.durableObjectsInboundWebSocketMessages,
+      durableObjectsOutboundWebSocketMessages: todayUsage.durableObjectsOutboundWebSocketMessages,
       durableObjectsRawRequests: todayUsage.durableObjectsRawRequests,
       durableObjectsRequestsEstimated: todayUsage.durableObjectsRequestsEstimated,
       durableObjectsRequestBillingRatio: todayUsage.durableObjectsRequestBillingRatio,
