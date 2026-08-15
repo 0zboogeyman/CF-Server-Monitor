@@ -827,6 +827,7 @@ const settings = ref({
   show_expire: true,
   show_tf: true,
   show_time: true,
+  wss_report_enabled: false,
   long_history_points: String(HISTORY.DEFAULT_LONG_RANGE_POINTS),
   tg_notify: '0',
   expire_reminder: '0',
@@ -961,6 +962,19 @@ const rxCorrection = ref('')
 const txCorrection = ref('')
 const autoUpdate = ref(false)
 const copiedCmd = ref(false)
+
+const isWssReportEnabled = computed(() => settings.value.wss_report_enabled === true)
+const getEffectiveConnectionMode = (value) => {
+  const connectionMode = value === 'http' ? 'http' : 'auto'
+  return isWssReportEnabled.value ? connectionMode : 'http'
+}
+
+watch(isWssReportEnabled, (enabled) => {
+  if (!enabled) {
+    editForm.value.connection_mode = 'http'
+    connectionMode.value = 'http'
+  }
+})
 
 const getPingNodeLabel = (field) => ({
   custom_ct: trans.value.customCt,
@@ -1184,6 +1198,7 @@ const loadSettings = async () => {
         show_expire: settingsData.show_expire === 'true',
         show_tf: settingsData.show_tf === 'true',
         show_time: settingsData.show_time === 'true',
+        wss_report_enabled: settingsData.wss_report_enabled === 'true' || settingsData.wss_report_enabled === true,
         long_history_points: normalizeLongHistoryPointsSetting(settingsData.long_history_points),
         tg_notify: normalizeTgNotifySetting(settingsData.tg_notify),
         expire_reminder: normalizeExpireReminderSetting(settingsData.expire_reminder),
@@ -1322,6 +1337,7 @@ const saveSettings = async () => {
       show_expire: settings.value.show_expire ? 'true' : 'false',
       show_tf: settings.value.show_tf ? 'true' : 'false',
       show_time: settings.value.show_time ? 'true' : 'false',
+      wss_report_enabled: settings.value.wss_report_enabled ? 'true' : 'false',
       long_history_points: normalizeLongHistoryPointsSetting(settings.value.long_history_points),
       tg_notify: normalizeTgNotifySetting(settings.value.tg_notify),
       expire_reminder: normalizeExpireReminderSetting(settings.value.expire_reminder),
@@ -1456,7 +1472,7 @@ const copyCmd = (serverId) => {
   installGhProxy.value = ''
   collectInterval.value = server?.collect_interval ?? 0
   reportInterval.value = server?.report_interval || 60
-  connectionMode.value = server?.connection_mode === 'http' ? 'http' : 'auto'
+  connectionMode.value = getEffectiveConnectionMode(server?.connection_mode)
   customCt.value = server?.custom_ct || settings.value.custom_ct
   customCu.value = server?.custom_cu || settings.value.custom_cu
   customCm.value = server?.custom_cm || settings.value.custom_cm
@@ -1483,6 +1499,7 @@ const getCustomInstallCommand = () => {
   const HOST = selectedApiBase.value
   const autoUpdateFlag = autoUpdate.value ? 1 : 0
   const proxy = installGhProxy.value.trim()
+  const effectiveConnectionMode = getEffectiveConnectionMode(connectionMode.value)
   if (targetOs.value === 'windows') {
     const params = [
       'install'
@@ -1494,7 +1511,7 @@ const getCustomInstallCommand = () => {
       `-url='${HOST}/update'`,
       `-collect_interval='${collectInterval.value}'`,
       `-interval='${reportInterval.value}'`,
-      `-connection_mode='${connectionMode.value === 'http' ? 'http' : 'auto'}'`,
+      `-connection_mode='${effectiveConnectionMode}'`,
       `-reset_day='${resetDay.value ?? 1}'`,
       `-auto_update='${autoUpdateFlag}'`
     )
@@ -1516,7 +1533,7 @@ const getCustomInstallCommand = () => {
     `-url=${HOST}/update`,
     `-collect_interval=${collectInterval.value}`,
     `-interval=${reportInterval.value}`,
-    `-connection_mode=${connectionMode.value === 'http' ? 'http' : 'auto'}`,
+    `-connection_mode=${effectiveConnectionMode}`,
     `-reset_day=${resetDay.value ?? 1}`,
     `-auto_update=${autoUpdateFlag}`
   )
@@ -1590,7 +1607,7 @@ const openEditModal = (server) => {
     reset_day: server.reset_day ?? 1,
     collect_interval: server.collect_interval ?? 0,
     report_interval: server.report_interval || 60,
-    connection_mode: server.connection_mode === 'http' ? 'http' : 'auto',
+    connection_mode: getEffectiveConnectionMode(server.connection_mode),
     custom_ct: server.custom_ct || '',
     custom_cu: server.custom_cu || '',
     custom_cm: server.custom_cm || '',
@@ -1676,7 +1693,7 @@ const saveEdit = async () => {
     reset_day: editForm.value.reset_day,
     collect_interval: editForm.value.collect_interval,
     report_interval: editForm.value.report_interval,
-    connection_mode: editForm.value.connection_mode === 'http' ? 'http' : 'auto',
+    connection_mode: getEffectiveConnectionMode(editForm.value.connection_mode),
     custom_ct: pingNodeValidation.values.custom_ct,
     custom_cu: pingNodeValidation.values.custom_cu,
     custom_cm: pingNodeValidation.values.custom_cm,

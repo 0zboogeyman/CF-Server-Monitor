@@ -1,4 +1,5 @@
 import { md5Hash } from './common.js';
+import { isWssReportEnabled } from './settings.js';
 
 export const AGENT_CONFIG_SCHEMA_VERSION = 4;
 export const AGENT_CONFIG_LEGACY_SCHEMA_VERSION = 3;
@@ -238,7 +239,8 @@ export function buildAgentConfig(server, settings = null, schemaVersion = AGENT_
   };
 
   if (version >= AGENT_CONFIG_SCHEMA_VERSION) {
-    config.connection_mode = normalizeConnectionMode(server?.connection_mode) || CONNECTION_MODE_AUTO;
+    const connectionMode = normalizeConnectionMode(server?.connection_mode) || CONNECTION_MODE_AUTO;
+    config.connection_mode = isWssReportEnabled(settings) ? connectionMode : CONNECTION_MODE_HTTP;
   }
 
   return config;

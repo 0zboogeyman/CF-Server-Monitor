@@ -8,7 +8,7 @@ import {
 } from '../utils/metrics.js';
 import { createErrorResponse, createUnauthorizedResponse, createNotFoundResponse, createBadRequestResponse } from '../utils/errors.js';
 import { ensureServerOptimization } from '../database/indexOptimization.js';
-import { getResourceAlertConfig, loadSiteSettings } from '../utils/settings.js';
+import { getResourceAlertConfig, isWssReportEnabled, loadSiteSettings } from '../utils/settings.js';
 import { cacheLatestReportUpdate } from '../utils/latestReportCache.js';
 import {
   hasRecentFrontendRealtimeActivity,
@@ -643,5 +643,12 @@ export async function handleWebSocketUpgrade(request, env) {
 }
 
 export async function handleUpdateWebSocketUpgrade(request, env) {
+  const settings = await loadSiteSettings(env.DB);
+  if (!isWssReportEnabled(settings)) {
+    return new Response(JSON.stringify({ error: 'Agent WSS report disabled', code: 403 }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
   return forwardWebSocketUpgrade(request, env, '/update', '[update-ws]');
 }

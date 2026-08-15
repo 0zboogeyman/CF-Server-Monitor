@@ -1,7 +1,7 @@
 import { checkAuth, simpleAuthResponse, validateCredentials, generateToken } from '../middleware/auth.js';
 import { getLatestMetricsForAllServers } from '../database/schema.js';
 import { getAllServers, clearServersListCache } from '../utils/cache.js';
-import { clearAppearanceSettingsCache, normalizeDisplayMode, normalizeExpireReminder, normalizeLongHistoryPoints, normalizeResourceAlertRules, normalizeTgNotify, saveSiteOptions, SITE_FIELDS, APPEARANCE_FIELDS } from '../utils/settings.js';
+import { clearAppearanceSettingsCache, isWssReportEnabled, normalizeBooleanSetting, normalizeDisplayMode, normalizeExpireReminder, normalizeLongHistoryPoints, normalizeResourceAlertRules, normalizeTgNotify, saveSiteOptions, SITE_FIELDS, APPEARANCE_FIELDS } from '../utils/settings.js';
 import { mergeMetricsIntoServer } from '../utils/metrics.js';
 import { verifyTurnstileToken, hashPassword } from '../utils/common.js';
 import { AppError, createSuccessResponse, createBadRequestResponse, createUnauthorizedResponse, createErrorResponse } from '../utils/errors.js';
@@ -9,7 +9,7 @@ import { addServerColumns } from '../database/updateDatabase.js';
 import { clearResourceAlertState, sendNotification } from '../services/notification.js';
 import { getNextServerHistoryPartitionId, HISTORY_MAX_PARTITION_ID } from '../database/indexOptimization.js';
 import { isValidTrafficCorrection, normalizeConnectionMode, validateAgentConfigInput, validatePingNode, validateNetworkInterfaces } from '../utils/agentConfig.js';
-import { scheduleAgentConfigChanged } from '../utils/agentConfigNotify.js';
+import { scheduleAgentConfigChanged, scheduleAgentReportModeChanged } from '../utils/agentConfigNotify.js';
 import { detectBillingCycle, detectCurrencySymbol, normalizeBillingCycle, normalizeCurrency, normalizePrice, renewExpireDateIfNeeded } from '../utils/serverBilling.js';
 
 const PING_NODE_FIELDS = ['custom_ct', 'custom_cu', 'custom_cm', 'custom_bd'];
@@ -732,6 +732,8 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
       }
 
       const siteOptions = {};
+      const shouldCloseAgentWssReports = settings.wss_report_enabled !== undefined &&
+        normalizeBooleanSetting(settings.wss_report_enabled) === 'false';
       for (const field of SITE_FIELDS) {
         if (settings[field] !== undefined) {
           if (field === 'password') {
@@ -748,6 +750,8 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
             siteOptions[field] = normalizeLongHistoryPoints(settings[field]);
           } else if (field === 'resource_alert_rules') {
             siteOptions[field] = normalizedResourceAlertRules;
+          } else if (field === 'wss_report_enabled') {
+            siteOptions[field] = normalizeBooleanSetting(settings[field]);
           } else if (field === 'theme_url') {
             siteOptions[field] = normalizedThemeUrl;
           } else {
@@ -762,6 +766,9 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
         await clearResourceAlertState(env.DB);
       }
       Object.assign(sys, shouldSaveAppearanceOptions ? appearanceOptions : {}, siteOptions);
+      if (shouldCloseAgentWssReports) {
+        scheduleAgentReportModeChanged(env, ctx);
+      }
       return createSuccessResponse({
         success: true,
         message: 'updateSuccess'
@@ -844,11 +851,12 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
       if (!id || !isValidUUID(id)) {
         return createBadRequestResponse('invalidServerId');
       }
+      const effectiveConnectionMode = isWssReportEnabled(sys) ? connection_mode : 'http';
       const agentConfigResult = validateAgentConfigInput({
         collect_interval,
         report_interval,
         reset_day,
-        connection_mode
+        connection_mode: effectiveConnectionMode
       });
       if (!agentConfigResult.valid) {
         return createBadRequestResponse(agentConfigResult.error);

@@ -15,7 +15,7 @@
 import { saveMetricsHistory } from '../database/schema.js';
 import { ensureServerOptimization } from '../database/indexOptimization.js';
 import { getServerDetail, clearServerDetailCache } from '../utils/cache.js';
-import { loadSiteSettings } from '../utils/settings.js';
+import { isWssReportEnabled, loadSiteSettings } from '../utils/settings.js';
 import {
   AGENT_CONFIG_MD5_HEADER,
   AGENT_CONFIG_LEGACY_SCHEMA_VERSION,
@@ -846,7 +846,7 @@ export class MetricsBroadcaster {
   async _loadAgentConfigDescriptor(serverId, forceRefresh = false, schemaVersion = AGENT_CONFIG_SCHEMA_VERSION) {
     const [serverDetail, settings] = await Promise.all([
       this._getAgentServerDetail(serverId, forceRefresh),
-      loadSiteSettings(this.env.DB)
+      loadSiteSettings(this.env.DB, { forceRefresh })
     ]);
     if (!serverDetail) return null;
     return describeAgentConfig(serverDetail, settings, schemaVersion);
@@ -950,6 +950,33 @@ export class MetricsBroadcaster {
     return { matched, delivered };
   }
 
+  _closeAgentReportWebSockets(message = 'Agent WSS report disabled') {
+    let matched = 0;
+    let closed = 0;
+
+    for (const ws of this._getAgentReportWebSockets()) {
+      const attachment = ws.deserializeAttachment() || {};
+      if (attachment.kind !== AGENT_REPORT_KIND) continue;
+      matched += 1;
+
+      try {
+        this._sendWsJson(ws, {
+          type: 'error',
+          ts: Date.now(),
+          error: message,
+          code: 403
+        });
+      } catch (_) {}
+
+      try {
+        ws.close(WS_POLICY_VIOLATION, message);
+        closed += 1;
+      } catch (_) {}
+    }
+
+    return { matched, closed };
+  }
+
   async _handleAgentConfigChanged(request) {
     let body = null;
     try {
@@ -958,6 +985,24 @@ export class MetricsBroadcaster {
       return new Response(JSON.stringify({ error: 'invalid JSON' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
+    if (body?.agentReportModeChanged === true) {
+      const settings = await loadSiteSettings(this.env.DB, { forceRefresh: true });
+      const wssReportEnabled = isWssReportEnabled(settings);
+      const result = wssReportEnabled
+        ? { matched: 0, closed: 0 }
+        : this._closeAgentReportWebSockets();
+      return new Response(JSON.stringify({
+        ok: true,
+        wssReportEnabled,
+        ...result
+      }), {
+        headers: {
+          'Cache-Control': 'no-store',
+          'Content-Type': 'application/json'
+        }
       });
     }
 

@@ -18,11 +18,13 @@ const server = {
   report_interval: 60,
   reset_day: 15
 };
-const expected = 'collect_interval=1&report_interval=60&reset_day=15&schema_version=4&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=&connection_mode=auto';
+const expected = 'collect_interval=1&report_interval=60&reset_day=15&schema_version=4&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=&connection_mode=http';
+const expectedWssEnabled = 'collect_interval=1&report_interval=60&reset_day=15&schema_version=4&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=&connection_mode=auto';
 const expectedLegacy = 'collect_interval=1&report_interval=60&reset_day=15&schema_version=3&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=';
 
 const config = buildAgentConfig(server);
 assert.equal(serializeAgentConfig(config), expected);
+assert.equal(serializeAgentConfig(buildAgentConfig(server, { wss_report_enabled: 'true' })), expectedWssEnabled);
 assert.equal(serializeAgentConfig(buildAgentConfig(server, null, AGENT_CONFIG_LEGACY_SCHEMA_VERSION)), expectedLegacy);
 
 const descriptor = await describeAgentConfig(server);
@@ -71,9 +73,11 @@ assert.deepEqual(buildAgentConfig({}), {
   custom_bd: '',
   interface: '',
   schema_version: 4,
-  connection_mode: 'auto'
+  connection_mode: 'http'
 });
 assert.equal(buildAgentConfig({ connection_mode: 'post' }).connection_mode, 'http');
+assert.equal(buildAgentConfig({ connection_mode: 'auto' }, { wss_report_enabled: 'true' }).connection_mode, 'auto');
+assert.equal(buildAgentConfig({ connection_mode: 'http' }, { wss_report_enabled: 'true' }).connection_mode, 'http');
 assert.equal(validateAgentConfigInput({ ...server, connection_mode: 'http' }).config.connection_mode, 'http');
 assert.equal(validateAgentConfigInput({ ...server, connection_mode: 'bad' }).valid, false);
 

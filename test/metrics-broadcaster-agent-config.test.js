@@ -25,6 +25,35 @@ function makeBroadcaster(webSockets = [], env = { DB: {} }) {
   }, env);
 }
 
+function makeSettingsDb(settingsSource) {
+  const readSettings = typeof settingsSource === 'function'
+    ? settingsSource
+    : () => settingsSource;
+  return {
+    prepare() {
+      return {
+        bind() {
+          return this;
+        },
+        async first() {
+          return {
+            value: JSON.stringify({
+              jwt_secret: 'x'.repeat(32),
+              ...(readSettings() || {})
+            })
+          };
+        },
+        async all() {
+          return { results: [] };
+        },
+        async run() {
+          return { success: true };
+        }
+      };
+    }
+  };
+}
+
 function makeDescriptor(md5 = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', schemaVersion = 4) {
   const serialized = schemaVersion >= 4
     ? `collect_interval=0&report_interval=60&reset_day=1&schema_version=${schemaVersion}&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=&connection_mode=auto`
@@ -298,6 +327,81 @@ test('WSS agent config push keeps legacy schema without connection mode', () => 
   assert.equal(sent[0].config_schema, 3);
   assert.equal(sent[0].body, makeDescriptor('cccccccccccccccccccccccccccccccc', 3).serialized);
   assert.equal(Object.prototype.hasOwnProperty.call(sent[0].payload, 'connection_mode'), false);
+});
+
+test('WSS agent config descriptor force refreshes site settings', async () => {
+  let wssReportEnabled = 'true';
+  const broadcaster = makeBroadcaster([], {
+    DB: makeSettingsDb(() => ({ wss_report_enabled: wssReportEnabled }))
+  });
+  broadcaster._getAgentServerDetail = async () => ({
+    id: 'server-1',
+    collect_interval: 0,
+    report_interval: 60,
+    reset_day: 1,
+    connection_mode: 'auto'
+  });
+
+  let descriptor = await broadcaster._loadAgentConfigDescriptor('server-1', true, 4);
+  assert.equal(descriptor.config.connection_mode, 'auto');
+
+  wssReportEnabled = 'false';
+  descriptor = await broadcaster._loadAgentConfigDescriptor('server-1', true, 4);
+  assert.equal(descriptor.config.connection_mode, 'http');
+});
+
+test('agent report mode change closes existing Agent WSS when disabled', async () => {
+  const sent = [];
+  const closed = [];
+  const agentWs = {
+    deserializeAttachment() {
+      return {
+        kind: 'agent-report',
+        authenticated: true,
+        serverId: 'server-1'
+      };
+    },
+    send(message) {
+      sent.push(JSON.parse(message));
+    },
+    close(code, reason) {
+      closed.push({ code, reason });
+    }
+  };
+  const frontendWs = {
+    deserializeAttachment() {
+      return { scope: 'all' };
+    },
+    send() {
+      throw new Error('frontend socket should not receive agent mode messages');
+    },
+    close() {
+      throw new Error('frontend socket should not be closed');
+    }
+  };
+  const broadcaster = makeBroadcaster([agentWs, frontendWs], {
+    DB: makeSettingsDb({ wss_report_enabled: 'false' })
+  });
+
+  const response = await broadcaster._handleAgentConfigChanged(new Request('http://internal/agent-config-changed', {
+    method: 'POST',
+    body: JSON.stringify({ agentReportModeChanged: true })
+  }));
+  const body = await response.json();
+
+  assert.deepEqual(body, {
+    ok: true,
+    wssReportEnabled: false,
+    matched: 1,
+    closed: 1
+  });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].type, 'error');
+  assert.equal(sent[0].code, 403);
+  assert.deepEqual(closed, [{
+    code: 1008,
+    reason: 'Agent WSS report disabled'
+  }]);
 });
 
 test('resource alert rule batches are capped at 20 rules', () => {
