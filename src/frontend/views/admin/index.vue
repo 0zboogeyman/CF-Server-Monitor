@@ -230,6 +230,7 @@
         :install-gh-proxy="installGhProxy"
         :collect-interval="collectInterval"
         :report-interval="reportInterval"
+        :wss-report-interval="wssReportInterval"
         :connection-mode="connectionMode"
         :custom-ct="customCt"
         :custom-cu="customCu"
@@ -902,6 +903,7 @@ const editForm = ref({
   reset_day: 1,
   collect_interval: 0,
   report_interval: 60,
+  wss_report_interval: 2,
   connection_mode: 'auto',
   custom_ct: '',
   custom_cu: '',
@@ -951,6 +953,7 @@ const targetOs = ref('linux')
 const installGhProxy = ref('')
 const collectInterval = ref(0)
 const reportInterval = ref(60)
+const wssReportInterval = ref(2)
 const connectionMode = ref('auto')
 const customCt = ref('')
 const customCu = ref('')
@@ -1472,6 +1475,7 @@ const copyCmd = (serverId) => {
   installGhProxy.value = ''
   collectInterval.value = server?.collect_interval ?? 0
   reportInterval.value = server?.report_interval || 60
+  wssReportInterval.value = server?.wss_report_interval || 2
   connectionMode.value = getEffectiveConnectionMode(server?.connection_mode)
   customCt.value = server?.custom_ct || settings.value.custom_ct
   customCu.value = server?.custom_cu || settings.value.custom_cu
@@ -1607,6 +1611,7 @@ const openEditModal = (server) => {
     reset_day: server.reset_day ?? 1,
     collect_interval: server.collect_interval ?? 0,
     report_interval: server.report_interval || 60,
+    wss_report_interval: server.wss_report_interval || 2,
     connection_mode: getEffectiveConnectionMode(server.connection_mode),
     custom_ct: server.custom_ct || '',
     custom_cu: server.custom_cu || '',
@@ -1693,6 +1698,7 @@ const saveEdit = async () => {
     reset_day: editForm.value.reset_day,
     collect_interval: editForm.value.collect_interval,
     report_interval: editForm.value.report_interval,
+    wss_report_interval: editForm.value.wss_report_interval,
     connection_mode: getEffectiveConnectionMode(editForm.value.connection_mode),
     custom_ct: pingNodeValidation.values.custom_ct,
     custom_cu: pingNodeValidation.values.custom_cu,

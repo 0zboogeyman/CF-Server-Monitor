@@ -10,13 +10,13 @@
   <a href="README-en.md">English</a>
 </p>
 
-[![Workers](https://img.shields.io/badge/Workers-2.8.4%20Beta1-f38020?style=flat-square&logo=cloudflare&logoColor=white)](version.json)
+[![Workers](https://img.shields.io/badge/Workers-2.8.4%20Beta2-f38020?style=flat-square&logo=cloudflare&logoColor=white)](version.json)
 [![Agent](https://img.shields.io/badge/Agent-1.0.3-2563eb?style=flat-square)](https://github.com/huilang-me/cfsm-agent)
 [![GitHub Stars](https://img.shields.io/github/stars/huilang-me/CF-Server-Monitor?style=flat-square&logo=github)](https://github.com/huilang-me/CF-Server-Monitor/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/huilang-me/CF-Server-Monitor?style=flat-square&logo=github)](https://github.com/huilang-me/CF-Server-Monitor/forks)
 [![License](https://img.shields.io/badge/License-MIT-16a34a?style=flat-square)](#许可证)
 
-[在线演示](https://demo.huilang.me/) · [API 文档](API.md) · [Go 探针文档](agent-go.md) · [主题开发](theme-develop.md)
+[在线演示](https://demo.huilang.me/) · [API 文档](API.md) · [Go 探针文档](https://github.com/huilang-me/cfsm-agent) · [主题开发](theme-develop.md)
 
 </div>
 
@@ -55,7 +55,7 @@ CF-Server-Monitor 是一个部署在 Cloudflare Workers 上的服务器监控系
 - 免费托管：面板、API、数据库和实时推送都运行在 Cloudflare 上，按免费额度友好设计；默认 60 秒上报间隔可支持约 60 台服务器，改为 120 秒后理论上可翻倍。
 - 单向上报更安全：没有 WebSSH、没有远程命令下发、没有主控通道；Agent 只向 Worker 上报指标。
 - 功能覆盖完整：实时指标、历史图表、地图展示、离线通知、资源告警、到期提醒、主题商店、多语言和移动端适配都已内置。
-- 参数动态下发：后台可修改 Ping 节点、采集间隔、上报间隔、统计网卡、流量重置日、上下行流量校正等参数，Agent 后续自动拉取并生效；Worker 地址、`API_SECRET` 和自动更新开关变更需要重新执行安装命令。
+- 参数动态下发：后台可修改 Ping 节点、采集间隔、HTTP 上报间隔、WSS 上报间隔、统计网卡、流量重置日、上下行流量校正等参数，Agent 后续自动拉取并生效；Worker 地址、`API_SECRET` 和自动更新开关变更需要重新执行安装命令。
 - 支持非 root 安装：支持 `systemd --user` 的 Linux 可使用普通用户安装，探针文件写入 `~/.cf-probe/`。
 - 上报时间自动校准：Go Agent 会使用 Worker 响应中的 HTTP `Date` 头校正样本时间和 `boot_time`，降低服务器本地时间错误对历史图表的影响；不会修改系统时间。
 
@@ -95,14 +95,6 @@ flowchart LR
 2. 目标服务器安装 Agent，按上报间隔向 Worker 发送指标。
 3. Worker 校验 `API_SECRET`，写入 D1，并通过 Durable Object 广播实时数据。
 4. 前台大盘、详情页、管理后台和 iOS 小组件读取同一套 API。
-
-## 版本说明
-
-| 组件                       | 当前版本          | 说明                                                                    |
-| ------------------------ | ------------- | --------------------------------------------------------------------- |
-| Workers                  | `2.8.4 Beta1` | 当前仓库版本，以 [version.json](version.json) 为准                              |
-| Go Agent                 | `1.0.3`       | 默认 Agent，独立维护于 [cfsm-agent](https://github.com/huilang-me/cfsm-agent) |
-| Shell / PowerShell Agent | 旧版本，后续不再维护   | 保留旧脚本安装路径，仅建议特殊系统或纯脚本环境兜底使用                                         |
 
 近期变化：
 
@@ -264,7 +256,7 @@ npm run build:github-page
 | 分类            | 主要内容                                  |
 | ------------- | ------------------------------------- |
 | 站点设置          | 标题、背景、favicon、默认展示模式、公开访问策略           |
-| 服务器参数         | 上报间隔、采集间隔、Ping 节点、网卡、月流量、价格、到期时间、自动续费 |
+| 服务器参数         | HTTP/WSS 上报间隔、采集间隔、Ping 节点、网卡、月流量、价格、到期时间、自动续费 |
 | 安全设置          | 管理员账号密码、JWT Secret、Turnstile          |
 | 通知设置          | 离线告警、到期提醒、资源负载告警、测试通知                 |
 | 外观设置          | 自定义 CSS、`<head>`、CSP 白名单、Mikus 模式     |
@@ -496,7 +488,6 @@ CF-Server-Monitor/
 │   └── utils/               # 缓存、CORS、CSP、指标处理、版本检查
 ├── test/                    # 本地测试和模拟数据工具
 ├── API.md                   # REST / WebSocket API 文档
-├── agent-go.md              # Go Agent 说明
 ├── theme-develop.md         # 第三方主题开发文档
 ├── wrangler.toml            # 本地 Wrangler 配置
 └── version.json             # Worker / Agent 版本

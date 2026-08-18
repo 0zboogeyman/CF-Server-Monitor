@@ -54,12 +54,14 @@ function makeSettingsDb(settingsSource) {
   };
 }
 
-function makeDescriptor(md5 = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', schemaVersion = 4) {
-  const serialized = schemaVersion >= 4
-    ? `collect_interval=0&report_interval=60&reset_day=1&schema_version=${schemaVersion}&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=&connection_mode=auto`
-    : `collect_interval=0&report_interval=60&reset_day=1&schema_version=${schemaVersion}&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=`;
+function makeDescriptor(md5 = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', schemaVersion = 5) {
+  const serialized = schemaVersion >= 5
+    ? `collect_interval=2&report_interval=60&reset_day=1&schema_version=${schemaVersion}&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=&connection_mode=auto&wss_report_interval=2`
+    : schemaVersion >= 4
+      ? `collect_interval=0&report_interval=60&reset_day=1&schema_version=${schemaVersion}&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=&connection_mode=auto`
+      : `collect_interval=0&report_interval=60&reset_day=1&schema_version=${schemaVersion}&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=`;
   const config = {
-    collect_interval: 0,
+    collect_interval: schemaVersion >= 5 ? 2 : 0,
     report_interval: 60,
     reset_day: 1,
     schema_version: schemaVersion,
@@ -71,6 +73,9 @@ function makeDescriptor(md5 = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', schemaVersion 
   };
   if (schemaVersion >= 4) {
     config.connection_mode = 'auto';
+  }
+  if (schemaVersion >= 5) {
+    config.wss_report_interval = 2;
   }
   return {
     serialized,
@@ -136,15 +141,15 @@ test('WSS agent standard WebSocket adapter preserves attachment state', async ()
   assert.equal(broadcaster.standardAgentWebSocketCount, 0);
 });
 
-test('WSS agent ack suggests realtime or idle report interval', () => {
+test('WSS agent ack suggests configured realtime or idle report interval', () => {
   const broadcaster = makeBroadcaster();
-  assert.equal(broadcaster._getAgentNextWssReportAfterMs(60000, true), 4000);
-  assert.equal(broadcaster._getAgentNextWssReportAfterMs(60000, false), 8000);
-  assert.equal(broadcaster._getAgentNextWssReportAfterMs(120000, false), 16000);
-  assert.equal(broadcaster._getAgentNextWssReportAfterMs(180000, false), 24000);
-  assert.equal(broadcaster._getAgentNextWssReportAfterMs(30000, true), 2000);
+  assert.equal(broadcaster._getAgentNextWssReportAfterMs(4000, 60000, true), 4000);
+  assert.equal(broadcaster._getAgentNextWssReportAfterMs(4000, 30000, false), 60000);
+  assert.equal(broadcaster._getAgentNextWssReportAfterMs(10_000, 120000, false), 120000);
+  assert.equal(broadcaster._getAgentNextWssReportAfterMs(1000, 60000, true), 1000);
+  assert.equal(broadcaster._getAgentNextWssReportAfterMs(3000, 60000, true), 3000);
   assert.equal(
-    broadcaster._getAgentNextWssReportAfterMs(30000, {
+    broadcaster._getAgentNextWssReportAfterMs(3000, 30000, {
       frontendActive: false,
       resourceAlertActive: true,
       realtimeActive: true
@@ -152,7 +157,7 @@ test('WSS agent ack suggests realtime or idle report interval', () => {
     60000
   );
   assert.equal(
-    broadcaster._getAgentNextWssReportAfterMs(120000, {
+    broadcaster._getAgentNextWssReportAfterMs(10_000, 120000, {
       frontendActive: false,
       resourceAlertActive: true,
       realtimeActive: true
@@ -160,7 +165,7 @@ test('WSS agent ack suggests realtime or idle report interval', () => {
     120000
   );
   assert.equal(
-    broadcaster._getAgentNextWssReportAfterMs(60000, {
+    broadcaster._getAgentNextWssReportAfterMs(4000, 120000, {
       frontendActive: true,
       resourceAlertActive: true,
       realtimeActive: true
@@ -197,7 +202,7 @@ test('frontend realtime hint pushes active interval to connected agents', async 
   assert.equal(sent.length, 1);
   assert.equal(sent[0].type, 'ack');
   assert.equal(sent[0].realtimeHint, true);
-  assert.equal(sent[0].nextWssReportAfterMs, 2000);
+  assert.equal(sent[0].nextWssReportAfterMs, 30000);
 });
 
 test('WSS agent context uses current report interval from payload', async () => {
@@ -213,7 +218,7 @@ test('WSS agent context uses current report interval from payload', async () => 
     serverId: 'server-1',
     historyPartitionId: 42,
     reportIntervalMs: 60000,
-    configSchema: '4',
+    configSchema: '5',
     configMd5: 'none'
   }, {
     id: 'server-1',
@@ -221,7 +226,9 @@ test('WSS agent context uses current report interval from payload', async () => 
   });
 
   assert.equal(context.reportIntervalMs, 120000);
+  assert.equal(context.wssReportIntervalMs, 2000);
   assert.equal(serialized.reportIntervalMs, 120000);
+  assert.equal(serialized.wssReportIntervalMs, 2000);
 });
 
 test('WSS agent config ack is skipped when report omits config state', async () => {
@@ -238,7 +245,7 @@ test('WSS agent config ack is skipped when report omits config state', async () 
       configMd5: 'none'
     },
     serverId: 'server-1',
-    agentConfig: { schema: '4', md5: 'none', requested: false }
+    agentConfig: { schema: '5', md5: 'none', requested: false }
   });
 
   assert.equal(loads, 0);
@@ -256,7 +263,7 @@ test('WSS agent config ack is built when report includes config state', async ()
   const ack = await broadcaster._buildAgentConfigAck({
     attachment: {},
     serverId: 'server-1',
-    agentConfig: { schema: '4', md5: 'none', requested: true }
+    agentConfig: { schema: '5', md5: 'none', requested: true }
   });
 
   assert.equal(loads, 1);
@@ -269,6 +276,26 @@ test('WSS agent config ack is built when report includes config state', async ()
   assert.equal(Object.prototype.hasOwnProperty.call(ack, 'config'), false);
 });
 
+test('WSS schema 4 agent with matching legacy MD5 does not receive config again', async () => {
+  const descriptor = makeDescriptor('dddddddddddddddddddddddddddddddd', 4);
+  const broadcaster = makeBroadcaster();
+  broadcaster._loadAgentConfigDescriptor = async (_serverId, _forceRefresh, schemaVersion) => {
+    assert.equal(schemaVersion, 4);
+    return descriptor;
+  };
+
+  const ack = await broadcaster._buildAgentConfigAck({
+    attachment: {},
+    serverId: 'server-1',
+    agentConfig: { schema: '4', md5: descriptor.md5, requested: true }
+  });
+
+  assert.equal(ack.has_config, false);
+  assert.equal(ack.config_md5, descriptor.md5);
+  assert.equal(Object.prototype.hasOwnProperty.call(ack, 'body'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(ack, 'payload'), false);
+});
+
 test('WSS agent config push uses string body and structured payload', () => {
   const sent = [];
   const ws = {
@@ -277,7 +304,7 @@ test('WSS agent config push uses string body and structured payload', () => {
         kind: 'agent-report',
         authenticated: true,
         serverId: 'server-1',
-        configSchema: '4',
+        configSchema: '5',
         configMd5: 'none'
       };
     },
@@ -317,7 +344,8 @@ test('WSS agent config push keeps legacy schema without connection mode', () => 
   };
   const broadcaster = makeBroadcaster([ws]);
   const descriptors = new Map([
-    [4, makeDescriptor('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 4)],
+    [5, makeDescriptor('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 5)],
+    [4, makeDescriptor('dddddddddddddddddddddddddddddddd', 4)],
     [3, makeDescriptor('cccccccccccccccccccccccccccccccc', 3)]
   ]);
 

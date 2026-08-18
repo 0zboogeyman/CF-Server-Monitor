@@ -301,6 +301,7 @@ Headers: (按需) Authorization, X-Turnstile-Token/Verified
   "traffic_calc_type": "total",
   "reset_day": 1,
   "report_interval": 60,
+  "wss_report_interval": 2,
   "is_hidden": "0",
   "sort_order": 0,
   "cpu": 12.34,
@@ -611,6 +612,7 @@ interface Server {
   traffic_calc_type: string;
   reset_day: number;
   report_interval: number;
+  wss_report_interval: number;
   is_hidden: '0' | '1';
   sort_order: number;
   cpu: number;

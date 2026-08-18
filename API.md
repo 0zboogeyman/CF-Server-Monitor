@@ -223,10 +223,10 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
   ```
   Content-Type: application/json
   X-Agent-Version: <探针版本号>
-  X-Agent-Config-Schema: 4
+  X-Agent-Config-Schema: 5
   X-Agent-Config-Md5: <最后成功应用的配置 MD5，首次为 none>
   ```
-  动态配置请求头为新版探针使用的可选字段；当前新 Go Agent 使用 schema `4`。schema `3` 仍按旧兼容配置返回，未携带时保持旧版响应协议。
+  动态配置请求头为新版探针使用的可选字段；当前新 Go Agent 使用 schema `5`。schema `3` / `4` 仍按旧兼容配置返回，未携带时保持旧版响应协议。
 
   WebSocket 握手只能使用 `GET + Upgrade`，这是 WebSocket 协议限制；后端仍通过同一个 `/update` 路径区分 `POST` 与 `wss`。握手成功后服务端先发送：
 
@@ -314,7 +314,8 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
       { "ts": 1737638341000, "metrics": { "...": "metrics at this timestamp" } }
     ],
     "collect_interval": 1,
-    "report_interval": 60
+    "report_interval": 60,
+    "wss_report_interval": 2
   }
   ```
 
@@ -372,10 +373,10 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
 - 新版探针且配置 MD5 不一致，或仍有待确认流量修正：返回 `200 OK`，响应头携带当前
   `X-Agent-Config-Schema` 与 `X-Agent-Config-Md5`，响应体以固定顺序的完整 QueryParam 配置开头：
   ```text
-  collect_interval=0&report_interval=60&reset_day=1&schema_version=4&custom_ct=gd-ct-dualstack.ip.zstaticcdn.com&custom_cu=gd-cu-dualstack.ip.zstaticcdn.com&custom_cm=gd-cm-dualstack.ip.zstaticcdn.com&custom_bd=ip.zstaticcdn.com&interface=&connection_mode=auto
+  collect_interval=2&report_interval=60&reset_day=1&schema_version=5&custom_ct=gd-ct-dualstack.ip.zstaticcdn.com&custom_cu=gd-cu-dualstack.ip.zstaticcdn.com&custom_cm=gd-cm-dualstack.ip.zstaticcdn.com&custom_bd=ip.zstaticcdn.com&interface=&connection_mode=auto&wss_report_interval=2
   ```
   （`Content-Type: application/x-www-form-urlencoded; charset=utf-8`）
-- ~~动态配置包含 `traffic_calc_type`、`traffic_limit`、`auto_update` 等全部探针运行参数。~~ **2026-07-26 修订，2026-07-31 更新，2026-08-15 更新**：schema `4` 的 MD5 覆盖规范配置包含 `collect_interval`、`report_interval`、`reset_day`、`schema_version`、`custom_ct`、`custom_cu`、`custom_cm`、`custom_bd`、`interface`、`connection_mode`；schema `3` 兼容响应不包含 `connection_mode`。待应用的 `rx_correction`、`tx_correction` 会追加到响应体，但不参与配置 MD5；启用自动更新且版本不一致时追加 `update=1`。
+- ~~动态配置包含 `traffic_calc_type`、`traffic_limit`、`auto_update` 等全部探针运行参数。~~ **2026-07-26 修订，2026-07-31 更新，2026-08-15 更新，2026-08-18 更新，2026-08-19 更新**：schema `3` 不包含 `connection_mode`；schema `4` 增加 `connection_mode`，并保持原有序列化与 MD5 计算不变；schema `5` 在 WSS 全局开启且服务器 `connection_mode=auto` 时追加 `wss_report_interval`（`1-5` 秒，默认 `2`），并将 `collect_interval=0` 或大于 WSS 间隔的值规范为 WSS 间隔。待应用的 `rx_correction`、`tx_correction` 会追加到响应体，但不参与配置 MD5；启用自动更新且版本不一致时追加 `update=1`。
 - 探针应用流量修正后，可在下一次 `POST /update` 顶层回传 `rx_correction` / `tx_correction`。值匹配时后端清空待修正字段并直接返回纯文本 `OK`，本次请求不要求 `metrics`。
 - 失败：
   ```json
@@ -394,31 +395,32 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
   ```json
   { "type": "ack", "ts": 1737638343000, "persisted": true, "nextD1WriteAfterMs": 60000, "nextWssReportAfterMs": 60000 }
   ```
-  `persisted` 表示本条消息是否触发 D1 历史写入；`nextD1WriteAfterMs` 是距离下一次允许写入 D1 的最短等待时间。WSS 首条成功指标会立即写入一次 D1，后续按该服务器 `report_interval` 控制写入频率（允许值沿用配置：`30/60/120/180` 秒；异常回退 `60` 秒）。`nextWssReportAfterMs` 是服务端建议的下一次 WSS 上报间隔：有前端实时订阅时约为 `report_interval / 15`；仅资源告警缓存活跃且无前端订阅时至少 `60` 秒；无实时消费者时回退到 `report_interval`，用于降低 idle 状态 DO WebSocket 消息数。
-  新版 WSS Agent 可在握手 URL query 中携带 `config_schema=4` / `config_md5=<md5>`，也兼容握手 Header `X-Agent-Config-Schema: 4` 与 `X-Agent-Config-Md5` 记录当前配置状态；当某次上报消息携带 `config_schema: 4` / `config_md5` 时，ack 会同时返回动态配置协商字段。兼容 schema `3` 的 Agent 仍会收到不含 `connection_mode` 的 schema `3` 配置：
+  `persisted` 表示本条消息是否触发 D1 历史写入；`nextD1WriteAfterMs` 是距离下一次允许写入 D1 的最短等待时间。WSS 首条成功指标会立即写入一次 D1，后续按该服务器 `report_interval` 控制写入频率（允许值沿用配置：`30/60/120/180` 秒；异常回退 `60` 秒）。`nextWssReportAfterMs` 是服务端建议的下一次 WSS 上报间隔：有前端实时订阅时使用服务器 `wss_report_interval`；无前端访问时使用 `report_interval`，但最低为 `60` 秒，不区分资源告警缓存是否活跃。缺失或非法的 WSS 间隔回退为 `2` 秒。
+  新版 WSS Agent 可在握手 URL query 中携带 `config_schema=5` / `config_md5=<md5>`，也兼容握手 Header `X-Agent-Config-Schema: 5` 与 `X-Agent-Config-Md5` 记录当前配置状态；当某次上报消息携带 `config_schema: 5` / `config_md5` 时，ack 会同时返回动态配置协商字段。schema `3` / `4` Agent 仍会收到各自版本的兼容配置：
   ```json
   {
     "type": "ack",
     "ts": 1737638343000,
     "persisted": false,
     "nextD1WriteAfterMs": 30000,
-    "nextWssReportAfterMs": 3000,
-    "config_schema": 4,
+    "nextWssReportAfterMs": 2000,
+    "config_schema": 5,
     "config_md5": "b4d7c0d...",
     "has_config": true,
-    "body": "collect_interval=0&report_interval=60&reset_day=1&schema_version=4&custom_ct=gd-ct-dualstack.ip.zstaticcdn.com&custom_cu=gd-cu-dualstack.ip.zstaticcdn.com&custom_cm=gd-cm-dualstack.ip.zstaticcdn.com&custom_bd=&interface=&connection_mode=auto",
-    "config_body": "collect_interval=0&report_interval=60&reset_day=1&schema_version=4&custom_ct=gd-ct-dualstack.ip.zstaticcdn.com&custom_cu=gd-cu-dualstack.ip.zstaticcdn.com&custom_cm=gd-cm-dualstack.ip.zstaticcdn.com&custom_bd=&interface=&connection_mode=auto",
+    "body": "collect_interval=2&report_interval=60&reset_day=1&schema_version=5&custom_ct=gd-ct-dualstack.ip.zstaticcdn.com&custom_cu=gd-cu-dualstack.ip.zstaticcdn.com&custom_cm=gd-cm-dualstack.ip.zstaticcdn.com&custom_bd=&interface=&connection_mode=auto&wss_report_interval=2",
+    "config_body": "collect_interval=2&report_interval=60&reset_day=1&schema_version=5&custom_ct=gd-ct-dualstack.ip.zstaticcdn.com&custom_cu=gd-cu-dualstack.ip.zstaticcdn.com&custom_cm=gd-cm-dualstack.ip.zstaticcdn.com&custom_bd=&interface=&connection_mode=auto&wss_report_interval=2",
     "payload": {
-      "collect_interval": 0,
+      "collect_interval": 2,
       "report_interval": 60,
       "reset_day": 1,
-      "schema_version": 4,
+      "schema_version": 5,
       "custom_ct": "gd-ct-dualstack.ip.zstaticcdn.com",
       "custom_cu": "gd-cu-dualstack.ip.zstaticcdn.com",
       "custom_cm": "gd-cm-dualstack.ip.zstaticcdn.com",
       "custom_bd": "",
       "interface": "",
       "connection_mode": "auto",
+      "wss_report_interval": 2,
       "config_md5": "b4d7c0d..."
     }
   }
