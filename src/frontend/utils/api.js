@@ -118,7 +118,13 @@ export const createLiveSocket = (subscribe, handlers = {}, apiIndex = 0, serverI
   const connect = () => {
     manualClose = false
     try {
-      ws = new WebSocket(`${getWsBaseByIndex(apiIndex)}/api/ws?subscribe=${encodeURIComponent(scope)}`)
+      const url = new URL(`${getWsBaseByIndex(apiIndex)}/api/ws`)
+      url.searchParams.set('subscribe', scope)
+      const token = localStorage.getItem('jwt_token')
+      if (token) {
+        url.searchParams.set('token', token)
+      }
+      ws = new WebSocket(url.toString())
     } catch (e) {
       setStatus(false, 'WebSocket not supported')
       return

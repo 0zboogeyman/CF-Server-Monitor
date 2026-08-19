@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MetricsBroadcaster } from '../src/durable/MetricsBroadcaster.js';
-import { getHistoryMetrics } from '../src/handlers/update.js';
+import { getHistoryMetrics, handleWebSocketUpgrade } from '../src/handlers/update.js';
+import { buildAuthCookie, generateToken } from '../src/middleware/auth.js';
 
 globalThis.WebSocketRequestResponsePair = class WebSocketRequestResponsePair {
   constructor(request, response) {
@@ -84,6 +85,85 @@ function makeDescriptor(md5 = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', schemaVersion 
     correction: null
   };
 }
+
+function makeWebSocketUpgradeRequest(url, headers = {}) {
+  return new Request(url, {
+    headers: {
+      Upgrade: 'websocket',
+      ...headers
+    }
+  });
+}
+
+function makeWebSocketEnv(settings, onFetch = null) {
+  return {
+    API_SECRET: 'test-secret',
+    DB: makeSettingsDb(settings),
+    METRICS_BROADCASTER: {
+      idFromName() {
+        return 'global';
+      },
+      get() {
+        return {
+          async fetch(request) {
+            if (onFetch) onFetch(request);
+            return { status: 101 };
+          }
+        };
+      }
+    }
+  };
+}
+
+test('private frontend WebSocket rejects unauthenticated clients', async () => {
+  let forwarded = false;
+  const env = makeWebSocketEnv({ is_public: 'false' }, () => {
+    forwarded = true;
+  });
+
+  const response = await handleWebSocketUpgrade(
+    makeWebSocketUpgradeRequest('https://example.com/api/ws?subscribe=all'),
+    env
+  );
+
+  assert.equal(response.status, 401);
+  assert.equal(forwarded, false);
+});
+
+test('private frontend WebSocket accepts query token auth', async () => {
+  let forwardedUrl = '';
+  const env = makeWebSocketEnv({ is_public: 'false' }, request => {
+    forwardedUrl = request.url;
+  });
+  const token = await generateToken(env, { jwt_secret: 'x'.repeat(32) });
+
+  const response = await handleWebSocketUpgrade(
+    makeWebSocketUpgradeRequest(`https://example.com/api/ws?subscribe=all&token=${encodeURIComponent(token)}`),
+    env
+  );
+
+  assert.equal(response.status, 101);
+  assert.equal(new URL(forwardedUrl).pathname, '/ws');
+});
+
+test('private frontend WebSocket accepts auth cookie', async () => {
+  let forwarded = false;
+  const env = makeWebSocketEnv({ is_public: 'false' }, () => {
+    forwarded = true;
+  });
+  const token = await generateToken(env, { jwt_secret: 'x'.repeat(32) });
+  const cookie = buildAuthCookie(new Request('https://example.com/admin'), token);
+
+  const response = await handleWebSocketUpgrade(
+    makeWebSocketUpgradeRequest('https://example.com/api/ws?subscribe=all', {
+      Cookie: cookie
+    }),
+    env
+  );
+
+  assert.equal(response.status, 101);
+  assert.equal(forwarded, true);
+});
 
 test('WSS agent config state only requests ack for fields in current report', () => {
   const broadcaster = makeBroadcaster();

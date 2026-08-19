@@ -1,4 +1,4 @@
-import { checkAuth, simpleAuthResponse, validateCredentials, generateToken } from '../middleware/auth.js';
+import { buildAuthCookie, buildClearAuthCookie, checkAuth, simpleAuthResponse, validateCredentials, generateToken } from '../middleware/auth.js';
 import { getLatestMetricsForAllServers } from '../database/schema.js';
 import { getAllServers, clearServersListCache } from '../utils/cache.js';
 import { clearAppearanceSettingsCache, isWssReportEnabled, normalizeBooleanSetting, normalizeDisplayMode, normalizeExpireReminder, normalizeLongHistoryPoints, normalizeResourceAlertRules, normalizeTgNotify, saveSiteOptions, SITE_FIELDS, APPEARANCE_FIELDS } from '../utils/settings.js';
@@ -150,6 +150,14 @@ function buildThemePreviewAuthCookie(request, token) {
 function buildClearThemePreviewAuthCookie(request) {
   const secure = new URL(request.url).protocol === 'https:' ? '; Secure' : '';
   return `${THEME_PREVIEW_AUTH_COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax${secure}`;
+}
+
+function createSuccessResponseWithCookies(data, cookies = []) {
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  for (const cookie of cookies) {
+    if (cookie) headers.append('Set-Cookie', cookie);
+  }
+  return new Response(JSON.stringify(data), { status: 200, headers });
 }
 
 function normalizeThemeUrl(value) {
@@ -502,18 +510,29 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
           success: true,
           token: token,
           message: 'loginSuccessful'
+        }, {
+          'Set-Cookie': buildAuthCookie(request, token)
         });
       } catch (e) {
         return createErrorResponse(e);
       }
     }
 
-    if (data.action === 'clear_theme_preview_auth') {
-      return createSuccessResponse({
+    if (data.action === 'logout') {
+      return createSuccessResponseWithCookies({
         success: true
-      }, {
-        'Set-Cookie': buildClearThemePreviewAuthCookie(request)
-      });
+      }, [
+        buildClearAuthCookie(request),
+        buildClearThemePreviewAuthCookie(request)
+      ]);
+    }
+
+    if (data.action === 'clear_theme_preview_auth') {
+      return createSuccessResponseWithCookies({
+        success: true
+      }, [
+        buildClearThemePreviewAuthCookie(request)
+      ]);
     }
 
     if (!await checkAuth(request, env, sys)) {

@@ -1093,7 +1093,7 @@ const handleLogin = async () => {
 
 const logout = async () => {
   try {
-    await adminApiForSite({ action: 'clear_theme_preview_auth' })
+    await adminApiForSite({ action: 'logout' })
   } catch (_) {
   }
   apiLogout()

@@ -1410,8 +1410,6 @@ export class MetricsBroadcaster {
     if (origin && allowedOrigins.length > 0) {
       responseHeaders.set('Access-Control-Allow-Origin', origin);
       responseHeaders.set('Access-Control-Allow-Credentials', 'true');
-    } else if (allowedOrigins.length === 0) {
-      responseHeaders.set('Access-Control-Allow-Origin', '*');
     }
 
     return new Response(null, {
