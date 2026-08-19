@@ -1595,20 +1595,6 @@ body::before {
     color: var(--accent-yellow);
 }
 
-.stat-time-row {
-    margin-top: -1px;
-    margin-bottom: 0;
-}
-
-.stat-time-value {
-    color: var(--text-secondary);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    min-width: 0;
-    max-width: 100%;
-}
-
 /* --------------------------------------------------------------------------
    14. Ping Panel
    -------------------------------------------------------------------------- */

@@ -10,7 +10,7 @@
   <a href="README-en.md">English</a>
 </p>
 
-[![Workers](https://img.shields.io/badge/Workers-2.8.4%20Beta3-f38020?style=flat-square&logo=cloudflare&logoColor=white)](version.json)
+[![Workers](https://img.shields.io/badge/Workers-2.8.4%20Beta4-f38020?style=flat-square&logo=cloudflare&logoColor=white)](version.json)
 [![GitHub Stars](https://img.shields.io/github/stars/huilang-me/CF-Server-Monitor?style=flat-square&logo=github)](https://github.com/huilang-me/CF-Server-Monitor/stargazers)
 [![GitHub Forks](https://img.shields.io/github/forks/huilang-me/CF-Server-Monitor?style=flat-square&logo=github)](https://github.com/huilang-me/CF-Server-Monitor/forks)
 [![License](https://img.shields.io/badge/License-MIT-16a34a?style=flat-square)](#许可证)
@@ -97,8 +97,7 @@ flowchart LR
 
 近期变化：
 
-- `2.8.4 Beta3`：通知设置新增自定义 Webhook 渠道、GET/POST 自定义参数、统一通知模板和 `{{emoji}}` 变量，测试通知会按模板发送。
-- `2.8.4`：新增 Agent WSS 上报通道，提升实时数据推送及时性；新增 D1 / Workers / Durable Objects 账户用量展示，优化无前端订阅时的 Durable Object 实时广播请求，降低空闲额度消耗。
+- `2.8.4`：新增 Agent WSS 上报，提升实时数据推送及时性；新增账户Do用量展示，优化无前端订阅时的 Do 实时广播请求，降低空闲额度消耗。通知设置新增自定义 Webhook 渠道, 新增前端wss超时配置。
 - `2.8.3`：新增磁盘 IO 统计，默认 Agent 切换为 Go 版本，新增服务器延迟与丢包率实时窗口。
 - `2.8.2`：引入 Go Agent 支持。
 - `2.8.1`：优化长时间历史查询 D1 读行，增加资源负载通知和主题商店接口优化。

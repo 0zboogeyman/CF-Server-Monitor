@@ -254,8 +254,7 @@ Headers: (按需) Authorization: Bearer <jwt>, X-Turnstile-Token/Verified
   "sysConfig": {
     "show_price": true,
     "show_expire": true,
-    "show_tf": true,
-    "show_time": true
+    "show_tf": true
   }
 }
 ```
@@ -720,7 +719,6 @@ interface SysConfig {
   show_price?: boolean;
   show_expire?: boolean;
   show_tf?: boolean;
-  show_time?: boolean;
   long_history_points?: number;
 }
 

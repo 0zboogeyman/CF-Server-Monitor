@@ -586,7 +586,6 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
     "show_price": true,
     "show_expire": true,
     "show_tf": true,
-    "show_time": true,
     "display_mode": "bar"
   }
 }
@@ -598,7 +597,7 @@ CORS_ALLOWED_ORIGINS=https://status.example.com,https://admin.example.com
 | `latestReportUpdates` | 每台服务器最近一次批量上报的采样回放数据，用于新页面连续回放；来自 Worker/DO 内存缓存，缓存约 4 分钟，进程重启或 DO 回收后允许为空。REST 响应中的样本统一为 `{ ts, data }`，`data` 按探针批量采样包透传；内置探针默认只在普通采样点上报 `cpu`、`ram_total`、`ram_used`、`swap_total`、`swap_used`、`net_in_speed`、`net_out_speed` |
 | `stats`       | 聚合统计：在线阈值 300 秒（5 分钟无上报视为离线）                                          |
 | `regionStats` | 按 ISO 区域码（大写）统计的服务器数                                                  |
-| `sysConfig`   | 当前站点开关：`show_price`、`show_expire`、`show_tf`、`show_time`、`display_mode`。主题配置请从 `/api/config` 的 `theme_options` 读取。~~旧版示例中的 `site_title` 不在该对象内。~~（2026-07-26 修订） |
+| `sysConfig`   | 当前站点开关：`show_price`、`show_expire`、`show_tf`、`display_mode`。主题配置请从 `/api/config` 的 `theme_options` 读取。~~旧版示例中的 `site_title` 不在该对象内。~~（2026-07-26 修订） |
 
 > `/api/servers` 的 `latestReportUpdates` 与 `servers[].ping` / `servers[].loss` 读取自 DO 实时状态，并在当前 Worker isolate 内短缓存约 4 分钟。该缓存不跨 isolate 共享，冷启动或缓存过期时会回源 DO。
 
@@ -1246,7 +1245,6 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled` 或
     "show_price": "true",
     "show_expire": "true",
     "show_tf": "true",
-    "show_time": "true",
     "frontend_ws_timeout_minutes": "20",
     "long_history_points": "120",
     "tg_notify": "0",
@@ -1273,7 +1271,7 @@ Header：`X-Turnstile-Token: <token>`（当 `site_options.turnstile_enabled` 或
 **字段分类**：
 
 - `APPEARANCE_FIELDS`（写入 `appearance_options` JSON）：`site_title`、`custom_bg`、`custom_head`、`custom_script`、`csp_static`、`csp_api`、`display_mode`、`theme_options`
-- `SITE_FIELDS`（写入 `site_options` JSON）：`is_public`、`show_price`、`show_expire`、`show_tf`、`show_time`、`frontend_ws_timeout_minutes`、`long_history_points`、通知、Turnstile、账号、Cloudflare、Ping 节点、`expire_reminder`、`theme_url`、历史优化字段等站点级配置
+- `SITE_FIELDS`（写入 `site_options` JSON）：`is_public`、`show_price`、`show_expire`、`show_tf`、`frontend_ws_timeout_minutes`、`long_history_points`、通知、Turnstile、账号、Cloudflare、Ping 节点、`expire_reminder`、`theme_url`、历史优化字段等站点级配置
 - 任何未列出的字段会被忽略
 
 **特殊处理**：
@@ -1757,7 +1755,6 @@ UUID 缺失或格式非法时返回 `400 { "error": "invalidServerId", "code": 4
   show_price: 'true' | 'false',
   show_expire: 'true' | 'false',
   show_tf: 'true' | 'false',
-  show_time: 'true' | 'false',
   frontend_ws_timeout_minutes: string, // '0'-'1440'；0 = 不超时
   long_history_points: '60' | '120' | '180' | '240',
   tg_notify: '0' | '2' ... '30',    // 0 = 关闭；旧值 false 兼容为 0，true 兼容为 5

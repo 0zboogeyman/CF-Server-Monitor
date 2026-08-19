@@ -123,11 +123,6 @@
             <input type="checkbox" id="cfg_show_tf" v-model="settings.show_tf">
             <label>{{ trans.showTf }}</label>
           </div>
-
-          <div class="form-group flex-1 checkbox-item">
-            <input type="checkbox" id="cfg_show_time" v-model="settings.show_time">
-            <label>{{ trans.showTime }}</label>
-          </div>
         </div>
 
         <div class="form-group">
