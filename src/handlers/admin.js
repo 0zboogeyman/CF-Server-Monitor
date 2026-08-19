@@ -1,7 +1,7 @@
 import { buildAuthCookie, buildClearAuthCookie, checkAuth, simpleAuthResponse, validateCredentials, generateToken } from '../middleware/auth.js';
 import { getLatestMetricsForAllServers } from '../database/schema.js';
 import { getAllServers, clearServersListCache } from '../utils/cache.js';
-import { clearAppearanceSettingsCache, isWssReportEnabled, normalizeBooleanSetting, normalizeDisplayMode, normalizeExpireReminder, normalizeLongHistoryPoints, normalizeResourceAlertRules, normalizeTgNotify, saveSiteOptions, SITE_FIELDS, APPEARANCE_FIELDS } from '../utils/settings.js';
+import { clearAppearanceSettingsCache, isWssReportEnabled, normalizeBooleanSetting, normalizeDisplayMode, normalizeExpireReminder, normalizeLongHistoryPoints, normalizeNotificationTemplate, normalizeNotificationWebhookBody, normalizeNotificationWebhookFormat, normalizeNotificationWebhookHeaders, normalizeNotificationWebhookMethod, normalizeResourceAlertRules, normalizeTgNotify, saveSiteOptions, SITE_FIELDS, APPEARANCE_FIELDS } from '../utils/settings.js';
 import { mergeMetricsIntoServer } from '../utils/metrics.js';
 import { verifyTurnstileToken, hashPassword } from '../utils/common.js';
 import { AppError, createSuccessResponse, createBadRequestResponse, createUnauthorizedResponse, createErrorResponse } from '../utils/errors.js';
@@ -650,13 +650,43 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
       }
     }
     else if (data.action === 'send_test_notification') {
-      const { tg_bot_token, tg_chat_id } = data;
-      if (!tg_bot_token || tg_bot_token.trim().length === 0) {
+      const {
+        tg_bot_token,
+        tg_chat_id,
+        notification_webhook_enabled,
+        notification_webhook_url,
+        notification_webhook_method,
+        notification_webhook_format,
+        notification_webhook_headers,
+        notification_webhook_body,
+        notification_template
+      } = data;
+      const webhookEnabled = normalizeBooleanSetting(notification_webhook_enabled) === 'true';
+      if (webhookEnabled) {
+        if (!notification_webhook_url || String(notification_webhook_url).trim().length === 0) {
+          return createBadRequestResponse('notificationWebhookUrlRequired');
+        }
+      } else if (!tg_bot_token || tg_bot_token.trim().length === 0) {
         return createBadRequestResponse('tgBotTokenRequired');
       }
       try {
         const testMsg = `✅ **测试通知**\n\n这是一条来自 CF Server Monitor 的测试消息。\n\n**时间:** ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`;
-        const result = await sendNotification({ tg_bot_token, tg_chat_id: tg_chat_id || '' }, testMsg);
+        const result = await sendNotification({
+          tg_bot_token,
+          tg_chat_id: tg_chat_id || '',
+          notification_webhook_enabled: normalizeBooleanSetting(notification_webhook_enabled),
+          notification_webhook_url: notification_webhook_url || '',
+          notification_webhook_method: normalizeNotificationWebhookMethod(notification_webhook_method),
+          notification_webhook_format: normalizeNotificationWebhookFormat(notification_webhook_format),
+          notification_webhook_headers: normalizeNotificationWebhookHeaders(notification_webhook_headers),
+          notification_webhook_body: normalizeNotificationWebhookBody(notification_webhook_body),
+          notification_template: normalizeNotificationTemplate(notification_template)
+        }, testMsg, {
+          event: '测试通知',
+          clients: ['CF Server Monitor'],
+          count: 1,
+          message: '这是一条来自 CF Server Monitor 的测试消息。'
+        });
         if(result) {
           console.warn('Test notification failed:', result);
           return createBadRequestResponse('testNotificationFailed');
@@ -700,10 +730,20 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
         : currentResourceAlertRules;
       const resourceAlertEnabled = normalizedResourceAlertRules.length > 0;
       if (tgNotify !== '0' || expireReminder !== '0' || resourceAlertEnabled) {
+        const webhookEnabled = settings.notification_webhook_enabled !== undefined
+          ? normalizeBooleanSetting(settings.notification_webhook_enabled) === 'true'
+          : normalizeBooleanSetting(sys?.notification_webhook_enabled) === 'true';
+        const effectiveWebhookUrl = settings.notification_webhook_url !== undefined
+          ? settings.notification_webhook_url
+          : sys?.notification_webhook_url;
         const effectiveTgBotToken = settings.tg_bot_token !== undefined
           ? settings.tg_bot_token
           : sys?.tg_bot_token;
-        if (!effectiveTgBotToken || String(effectiveTgBotToken).trim().length === 0) {
+        if (webhookEnabled) {
+          if (!effectiveWebhookUrl || String(effectiveWebhookUrl).trim().length === 0) {
+            return createBadRequestResponse('notificationWebhookUrlRequired');
+          }
+        } else if (!effectiveTgBotToken || String(effectiveTgBotToken).trim().length === 0) {
           return createBadRequestResponse('tgBotTokenRequired');
         }
       }
@@ -771,6 +811,18 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
             siteOptions[field] = normalizedResourceAlertRules;
           } else if (field === 'wss_report_enabled') {
             siteOptions[field] = normalizeBooleanSetting(settings[field]);
+          } else if (field === 'notification_webhook_enabled') {
+            siteOptions[field] = normalizeBooleanSetting(settings[field]);
+          } else if (field === 'notification_webhook_method') {
+            siteOptions[field] = normalizeNotificationWebhookMethod(settings[field]);
+          } else if (field === 'notification_webhook_format') {
+            siteOptions[field] = normalizeNotificationWebhookFormat(settings[field]);
+          } else if (field === 'notification_webhook_headers') {
+            siteOptions[field] = normalizeNotificationWebhookHeaders(settings[field]);
+          } else if (field === 'notification_webhook_body') {
+            siteOptions[field] = normalizeNotificationWebhookBody(settings[field]);
+          } else if (field === 'notification_template') {
+            siteOptions[field] = normalizeNotificationTemplate(settings[field]);
           } else if (field === 'theme_url') {
             siteOptions[field] = normalizedThemeUrl;
           } else {
