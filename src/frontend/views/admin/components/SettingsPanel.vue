@@ -258,7 +258,7 @@
                 v-model="settings.notification_webhook_body"
                 class="form-textarea"
                 rows="6"
-                placeholder='{"title":"{{event}}","content":"{{notification}}"}'
+                placeholder='{"title":"{{emoji}} {{event}}","content":"{{notification}}"}'
               ></textarea>
             </div>
           </div>
@@ -271,7 +271,7 @@
               v-model="settings.notification_template"
               class="form-textarea"
               rows="5"
-              placeholder="【CF Server Monitor】{{event}}\n服务器: {{client}}\n数量: {{count}}\n详情:\n{{message}}\n时间: {{time}}"
+              placeholder="{{emoji}}【CF Server Monitor】{{event}}\n服务器: {{client}}\n详情:\n{{message}}\n时间: {{time}}"
             ></textarea>
           </div>
         </div>

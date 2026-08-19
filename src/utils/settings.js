@@ -1,4 +1,4 @@
-const CURRENT_VERSION = '2.8.4 Beta2';
+const CURRENT_VERSION = '2.8.4 Beta3';
 export const DEFAULT_SITE_TITLE = 'Cloudflare Server Monitor';
 export const APPEARANCE_FIELDS = ['site_title', 'custom_bg', 'favicon', 'custom_head', 'custom_script', 'csp_static', 'csp_api', 'display_mode', 'theme_options'];
 
@@ -17,11 +17,17 @@ export const RESOURCE_ALERT_WINDOW_MAX = 10;
 export const RESOURCE_ALERT_MODE_CONTINUOUS = 'continuous';
 export const RESOURCE_ALERT_MODE_AVERAGE = 'average';
 export const RESOURCE_ALERT_RULES_MAX = 20;
-export const DEFAULT_NOTIFICATION_TEMPLATE = '【CF Server Monitor】{{event}}\n服务器: {{client}}\n数量: {{count}}\n详情:\n{{message}}\n时间: {{time}}';
-export const DEFAULT_NOTIFICATION_WEBHOOK_BODY = '{\n  "title": "{{event}}",\n  "content": "{{notification}}"\n}';
+export const DEFAULT_NOTIFICATION_TEMPLATE = '{{emoji}}【CF Server Monitor】{{event}}\n服务器: {{client}}\n详情:\n{{message}}\n时间: {{time}}';
+export const DEFAULT_NOTIFICATION_WEBHOOK_BODY = '{\n  "title": "{{emoji}} {{event}}",\n  "content": "{{notification}}"\n}';
+const LEGACY_DEFAULT_NOTIFICATION_TEMPLATES = [
+  '事件: {{event}}\n服务名: {{client}}\n消息: {{message}}\n时间: {{time}}',
+  '【CF Server Monitor】{{event}}\n服务器: {{client}}\n数量: {{count}}\n详情:\n{{message}}\n时间: {{time}}',
+  '{{emoji}}【CF Server Monitor】{{event}}\n服务器: {{client}}\n数量: {{count}}\n详情:\n{{message}}\n时间: {{time}}'
+];
 const LEGACY_DEFAULT_NOTIFICATION_WEBHOOK_BODIES = [
   '{\n  "event": "{{event}}",\n  "client": "{{client}}",\n  "message": "{{message}}",\n  "time": "{{time}}"\n}',
-  '{\n  "title": "{{title}}",\n  "event": "{{event}}",\n  "client": "{{client}}",\n  "clients": "{{clients}}",\n  "count": "{{count}}",\n  "message": "{{message}}",\n  "notification": "{{notification}}",\n  "time": "{{time}}"\n}'
+  '{\n  "title": "{{title}}",\n  "event": "{{event}}",\n  "client": "{{client}}",\n  "clients": "{{clients}}",\n  "count": "{{count}}",\n  "message": "{{message}}",\n  "notification": "{{notification}}",\n  "time": "{{time}}"\n}',
+  '{\n  "title": "{{event}}",\n  "content": "{{notification}}"\n}'
 ];
 export const NOTIFICATION_WEBHOOK_METHODS = ['GET', 'POST'];
 export const NOTIFICATION_WEBHOOK_FORMATS = ['json', 'form', 'text'];
@@ -172,6 +178,9 @@ export function normalizeNotificationWebhookBody(value) {
 
 export function normalizeNotificationTemplate(value) {
   const template = String(value || '').trim();
+  if (LEGACY_DEFAULT_NOTIFICATION_TEMPLATES.includes(template)) {
+    return DEFAULT_NOTIFICATION_TEMPLATE;
+  }
   return (template || DEFAULT_NOTIFICATION_TEMPLATE).slice(0, 4000);
 }
 

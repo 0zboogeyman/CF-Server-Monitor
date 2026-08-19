@@ -328,15 +328,25 @@ function normalizeNotificationClients(context = {}) {
   return ['CF Server Monitor'];
 }
 
+function inferNotificationEmoji(event) {
+  const normalizedEvent = String(event || '');
+  if (/恢复|测试|成功/.test(normalizedEvent)) return '✅';
+  if (/到期|提醒/.test(normalizedEvent)) return '⚠️';
+  if (/离线|告警|失败|异常/.test(normalizedEvent)) return '❌';
+  return 'ℹ️';
+}
+
 function buildNotificationContext(msg, context = {}) {
   const now = formatCurrentTime();
   const clients = normalizeNotificationClients(context);
   const count = Number.isFinite(Number(context.count)) && Number(context.count) > 0
     ? Number(context.count)
     : clients.length;
+  const event = context.event || inferNotificationEvent(msg);
   return {
     title: '💌 Cloudflare Server Monitor',
-    event: context.event || inferNotificationEvent(msg),
+    event,
+    emoji: context.emoji || inferNotificationEmoji(event),
     client: context.client || clients.join(', '),
     clients: clients.join(', '),
     count: String(count),
@@ -706,6 +716,7 @@ export async function checkOfflineNodes(db) {
       const msg = `⚠️ **节点离线告警** (${offlineNodes.length}个)\n\n${nodeList}`;
       await sendNotification(siteSettings, msg, {
         event: '节点离线告警',
+        emoji: '❌',
         clients: offlineNodes.map(n => n.name),
         count: offlineNodes.length,
         message: nodeList
@@ -717,6 +728,7 @@ export async function checkOfflineNodes(db) {
       const msg = `✅ **节点恢复通知** (${recoveredNodes.length}个)\n\n${nodeList}\n\n**时间:** ${new Date().toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}`;
       await sendNotification(siteSettings, msg, {
         event: '节点恢复通知',
+        emoji: '✅',
         clients: recoveredNodes.map(n => n.name),
         count: recoveredNodes.length,
         message: nodeList
@@ -929,6 +941,9 @@ export async function checkResourceAlerts(env) {
         event: alertNodes.length > 0 && recoveredNodes.length > 0
           ? '资源负载通知'
           : (alertNodes.length > 0 ? '资源负载告警' : '资源负载恢复'),
+        emoji: alertNodes.length > 0 && recoveredNodes.length > 0
+          ? '⚠️'
+          : (alertNodes.length > 0 ? '❌' : '✅'),
         clients: notificationClients,
         count: new Set(notificationClients).size || messageSections.length,
         message: messageSections.join('\n\n')
@@ -993,6 +1008,7 @@ export async function checkExpiringServers(db) {
       debug(`[Cron] 发送到期提醒通知: ${msg}`);
       await sendNotification(siteSettings, msg, {
         event: '服务器到期提醒',
+        emoji: '⚠️',
         clients: expiringServers.map(s => s.name),
         count: expiringServers.length,
         message: serverList

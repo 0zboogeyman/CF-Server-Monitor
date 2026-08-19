@@ -683,6 +683,7 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
           notification_template: normalizeNotificationTemplate(notification_template)
         }, testMsg, {
           event: '测试通知',
+          emoji: '✅',
           clients: ['CF Server Monitor'],
           count: 1,
           message: '这是一条来自 CF Server Monitor 的测试消息。'
