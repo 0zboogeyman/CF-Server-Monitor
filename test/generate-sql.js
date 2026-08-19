@@ -215,6 +215,7 @@ const siteOptions = {
   show_expire: 'true',
   show_tf: 'true',
   show_time: 'true',
+  frontend_ws_timeout_minutes: '0',
   long_history_points: '120',
   tg_notify: '0',
   tg_bot_token: '',

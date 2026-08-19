@@ -298,6 +298,13 @@
       </div>
     </div>
 
+    <LiveConnectionTimeoutModal
+      :show="showLiveTimeoutModal"
+      :trans="trans"
+      @close="closeLiveConnection"
+      @continue="continueLiveConnection"
+    />
+
     <Footer />
   </div>
 </template>
@@ -310,7 +317,8 @@ import ServerBarCard from '../components/ServerBarCard.vue'
 import ServerRingCard from '../components/ServerRingCard.vue'
 import Footer from '../components/Footer.vue'
 import OsIcon from '../components/OsIcon.vue'
-import { fetchConfig, fetchServersAll, fetchServersAllWithProgress, formatBytes, createLiveSocket, getFlagRegionCode, getApiBases, isServerOnline } from '../utils/api.js'
+import LiveConnectionTimeoutModal from '../components/LiveConnectionTimeoutModal.vue'
+import { fetchConfig, fetchServersAll, fetchServersAllWithProgress, formatBytes, createLiveSocket, getFlagRegionCode, getApiBases, isServerOnline, normalizeLiveSocketTimeoutMinutes } from '../utils/api.js'
 import { calcTrafficUsagePercent, getUsageColor } from '../composables/useServerCardData'
 import { getTitle, hasMultipleApiBases, getPublicAssetUrl } from '../utils/config'
 import { currentLang, useTranslation } from '../utils/i18n.js'
@@ -341,6 +349,7 @@ const sysConfig = ref({
   show_expire: true,
   show_tf: true,
   show_time: true,
+  frontend_ws_timeout_minutes: normalizeLiveSocketTimeoutMinutes(appConfig?.frontend_ws_timeout_minutes),
   display_mode: 'bar',
   site_title: DEFAULT_SITE_TITLE,
   theme_options: normalizeThemeOptions(appConfig?.theme_options)
@@ -354,6 +363,7 @@ const isLoading = ref(true)
 const sitesRemaining = ref(0)
 const hasCorsError = ref(null)
 const financeModalOpen = ref(false)
+const showLiveTimeoutModal = ref(false)
 const financeCurrency = ref('CNY')
 const exchangeRates = ref(DEFAULT_EXCHANGE_RATES)
 const exchangeRateSource = ref('default')
@@ -763,6 +773,7 @@ const loadDashboardConfig = async () => {
       ...sysConfig.value,
       site_title: hasMultipleApiBases() && localTitle ? localTitle : (siteTitle || sysConfig.value.site_title),
       display_mode: resolveDisplayMode(config),
+      frontend_ws_timeout_minutes: normalizeLiveSocketTimeoutMinutes(config?.frontend_ws_timeout_minutes),
       theme_options: normalizeThemeOptions(config?.theme_options)
     }
   } catch (e) {
@@ -793,6 +804,7 @@ const refreshData = async () => {
           show_expire: data.sysConfig?.show_expire ?? true,
           show_tf: data.sysConfig?.show_tf ?? true,
           show_time: data.sysConfig?.show_time ?? true,
+          frontend_ws_timeout_minutes: sysConfig.value.frontend_ws_timeout_minutes,
           display_mode: normalizeDisplayMode(data.sysConfig?.display_mode),
           site_title: sysConfig.value.site_title || DEFAULT_SITE_TITLE,
           theme_options: sysConfig.value.theme_options
@@ -830,6 +842,7 @@ const refreshData = async () => {
       show_expire: data.sysConfig?.show_expire ?? true,
       show_tf: data.sysConfig?.show_tf ?? true,
       show_time: data.sysConfig?.show_time ?? true,
+      frontend_ws_timeout_minutes: sysConfig.value.frontend_ws_timeout_minutes,
       display_mode: normalizeDisplayMode(data.sysConfig?.display_mode),
       site_title: sysConfig.value.site_title || DEFAULT_SITE_TITLE,
       theme_options: sysConfig.value.theme_options
@@ -848,6 +861,7 @@ const refreshData = async () => {
 //   - 订阅 "all"，收到任何服务器的更新都会合并对应 server 的指标
 // -------------------------------------------------------------------------
 let liveSockets = []
+let liveConnectionClosedByUser = false
 let themeObserver = null
 let timeUpdateInterval = null
 
@@ -884,7 +898,11 @@ const startLiveSocket = () => {
     const allIds = servers.value.map(s => s.id).filter(Boolean)
     liveSockets = [createLiveSocket('all', {
       replay: false,
+      timeoutMinutes: sysConfig.value.frontend_ws_timeout_minutes,
       onMessage: queueLiveMessage,
+      onTimeout: () => {
+        showLiveTimeoutModal.value = true
+      },
       onStatus: ({ connected }) => {
         liveConnected.value = !!connected
       }
@@ -898,7 +916,11 @@ const startLiveSocket = () => {
     if (!ids || ids.length === 0) return null
     return createLiveSocket('all', {
       replay: false,
+      timeoutMinutes: sysConfig.value.frontend_ws_timeout_minutes,
       onMessage: queueLiveMessage,
+      onTimeout: () => {
+        showLiveTimeoutModal.value = true
+      },
       onStatus: ({ connected }) => {
         const anyConnected = liveSockets.some(s => s && s.isConnected)
         liveConnected.value = anyConnected
@@ -907,9 +929,27 @@ const startLiveSocket = () => {
   }).filter(Boolean)
 }
 
+const closeLiveConnection = () => {
+  showLiveTimeoutModal.value = false
+  liveConnectionClosedByUser = true
+  stopLiveSockets()
+}
+
+const continueLiveConnection = () => {
+  showLiveTimeoutModal.value = false
+  liveConnectionClosedByUser = false
+  if (liveSockets.length === 0) {
+    startLiveSocket()
+    return
+  }
+  liveSockets.forEach(socket => socket?.reconnect())
+}
+
 const handleVisibility = () => {
   if (document.hidden) {
     stopLiveSockets()
+  } else if (showLiveTimeoutModal.value || liveConnectionClosedByUser) {
+    return
   } else if (liveSockets.length === 0) {
     startLiveSocket()
   } else {

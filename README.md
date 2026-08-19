@@ -422,6 +422,7 @@ npm run build:github-page
 - `/api/ws` 支持三种 JWT 认证来源：`Authorization: Bearer <token>`、`Cookie: cfsm_auth=<token>`、查询参数 `token` / `auth_token` / `ws_token`。
 - 浏览器原生 WebSocket 不能自定义 `Authorization` Header，内置前端同域连接走 `cfsm_auth` Cookie，跨域连接才在 URL 中追加 `token=<jwt>` 查询参数。
 - 查询参数 token 可能出现在访问日志中，请只通过 HTTPS 使用，并避免把带 token 的 WebSocket URL 分享给他人。
+- 后台可配置“前端 WSS 超时（分钟）”：默认 `0`，表示不因连接时长主动断开；设为正整数后，内置前端到时会断开实时订阅并弹窗让用户选择关闭或继续。
 
 ### Turnstile
 

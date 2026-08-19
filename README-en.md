@@ -417,6 +417,10 @@ Send a test notification before saving.
 - After changing `API_SECRET`, redeploy the Worker and reinstall or update all Agents.
 - Keep the admin password separate from `API_SECRET` for long-term use.
 
+### Frontend WebSocket Timeout
+
+Admin settings can configure the frontend WSS timeout in minutes. The default `0` disables time-based disconnects; a positive value closes the built-in frontend subscription at the limit and prompts the user to close or continue.
+
 ### Turnstile
 
 Cloudflare Turnstile can be enabled from the admin panel to reduce abuse of public APIs and login endpoints. In multi-site mode, use the same Site Key across sites when Turnstile is enabled.

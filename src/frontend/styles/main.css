@@ -2398,6 +2398,35 @@ body::before {
     border-top: 1px solid var(--border-color);
 }
 
+.live-timeout-dialog {
+    width: 520px;
+}
+
+.live-timeout-message {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.live-timeout-icon {
+    flex: 0 0 auto;
+    color: var(--accent-yellow);
+    font-weight: 700;
+}
+
+.live-timeout-message strong {
+    display: block;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+}
+
+.live-timeout-message p {
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.6;
+    margin: 0;
+}
+
 /* --------------------------------------------------------------------------
    23. Host Card (Detail Page)
    -------------------------------------------------------------------------- */

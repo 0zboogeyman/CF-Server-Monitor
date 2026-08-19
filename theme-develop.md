@@ -192,6 +192,7 @@ Headers: (可选) Authorization: Bearer <jwt>, X-Turnstile-Token / X-Turnstile-V
   },
   "verified": false,
   "turnstile_verified": null,
+  "frontend_ws_timeout_minutes": 20,
   "long_history_points": 120
 }
 ```
@@ -212,6 +213,7 @@ Headers: (可选) Authorization: Bearer <jwt>, X-Turnstile-Token / X-Turnstile-V
 | `theme_options`      | object       | 第三方主题自定义配置；未配置时为空对象 |
 | `verified`           | boolean      | 当前请求是否已验证       |
 | `turnstile_verified` | string\|null | 已验证凭证，缓存复用 1 小时 |
+| `frontend_ws_timeout_minutes` | number | 前端实时订阅连接超时分钟数，范围 `0`-`1440`；默认 `0` 表示不超时 |
 | `long_history_points` | number      | 长历史查询返回的采样点数，可选 `60`、`120`、`180`、`240` |
 
 `theme_options` 对第三方主题是只读运行时配置。需要修改主题配置时，跳转到内置后台 `/admin#admin`，不要在第三方主题内调用管理端接口。
@@ -515,6 +517,8 @@ Headers: Upgrade: websocket, Connection: Upgrade
 
 为实现前端展示效果并节省额度消耗，主题应监听 `document.visibilitychange`，页面进入后台或隐藏时主动关闭 WebSocket，页面重新可见时再按当前页面类型重新连接并恢复订阅。关闭连接后可保留最后一次数据用于静态展示；重新可见时建议先按当前页面补一次 REST 数据，再恢复 WebSocket 实时更新。
 
+主题还应读取 `/api/config` 的 `frontend_ws_timeout_minutes`。值为 `0` 时不按连接时长断开；值为正整数时，应在单次连接达到对应分钟数后主动关闭，并由用户明确选择是否继续连接。继续后应建立新连接并重新开始计时，不应在用户选择关闭后静默重连。
+
 **推送策略**：
 
 | 订阅类型 | 推送方式 | 消息类型 | 说明 |
@@ -733,6 +737,7 @@ interface SiteConfig {
   theme_options: Record<string, unknown>;
   verified: boolean;
   turnstile_verified: string | null;
+  frontend_ws_timeout_minutes: number;
   long_history_points: number;
 }
 

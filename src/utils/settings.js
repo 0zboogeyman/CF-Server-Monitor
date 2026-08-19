@@ -2,7 +2,7 @@ const CURRENT_VERSION = '2.8.4 Beta3';
 export const DEFAULT_SITE_TITLE = 'Cloudflare Server Monitor';
 export const APPEARANCE_FIELDS = ['site_title', 'custom_bg', 'favicon', 'custom_head', 'custom_script', 'csp_static', 'csp_api', 'display_mode', 'theme_options'];
 
-export const SITE_FIELDS = ['is_public', 'show_price', 'show_expire', 'show_tf', 'show_time', 'wss_report_enabled', 'long_history_points', 'tg_notify', 'tg_bot_token', 'tg_chat_id', 'notification_webhook_enabled', 'notification_webhook_url', 'notification_webhook_method', 'notification_webhook_format', 'notification_webhook_headers', 'notification_webhook_body', 'notification_template', 'turnstile_enabled', 'turnstile_login_enabled', 'turnstile_site_key', 'turnstile_secret_key', 'jwt_secret', 'username', 'password', 'cloudflare_account_id', 'cloudflare_token', 'custom_ct', 'custom_cu', 'custom_cm', 'custom_bd', 'expire_reminder', 'resource_alert_rules', 'theme_url', 'history_id_optimized','servers_optimized'];
+export const SITE_FIELDS = ['is_public', 'show_price', 'show_expire', 'show_tf', 'show_time', 'wss_report_enabled', 'frontend_ws_timeout_minutes', 'long_history_points', 'tg_notify', 'tg_bot_token', 'tg_chat_id', 'notification_webhook_enabled', 'notification_webhook_url', 'notification_webhook_method', 'notification_webhook_format', 'notification_webhook_headers', 'notification_webhook_body', 'notification_template', 'turnstile_enabled', 'turnstile_login_enabled', 'turnstile_site_key', 'turnstile_secret_key', 'jwt_secret', 'username', 'password', 'cloudflare_account_id', 'cloudflare_token', 'custom_ct', 'custom_cu', 'custom_cm', 'custom_bd', 'expire_reminder', 'resource_alert_rules', 'theme_url', 'history_id_optimized','servers_optimized'];
 
 const SITE_SETTINGS_TTL = 120 * 1000;
 const JWT_SECRET_MIN_LENGTH = 32;
@@ -12,6 +12,7 @@ export const TG_NOTIFY_LEGACY_TRUE_MINUTES = 5;
 export const EXPIRE_REMINDER_DAYS_MAX = 7;
 export const LONG_HISTORY_POINT_OPTIONS = [60, 120, 180, 240];
 export const DEFAULT_LONG_HISTORY_POINTS = 120;
+export const FRONTEND_WS_TIMEOUT_MINUTES_MAX = 1440;
 export const RESOURCE_ALERT_WINDOW_MIN = 5;
 export const RESOURCE_ALERT_WINDOW_MAX = 10;
 export const RESOURCE_ALERT_MODE_CONTINUOUS = 'continuous';
@@ -65,6 +66,7 @@ const defaults = {
   show_tf: 'true',
   show_time: 'true',
   wss_report_enabled: 'false',
+  frontend_ws_timeout_minutes: '0',
   long_history_points: String(DEFAULT_LONG_HISTORY_POINTS),
   tg_notify: '0',
   tg_bot_token: '',
@@ -100,6 +102,15 @@ export function normalizeLongHistoryPoints(value) {
     LONG_HISTORY_POINT_OPTIONS.includes(points)
       ? points
       : DEFAULT_LONG_HISTORY_POINTS
+  );
+}
+
+export function normalizeFrontendWsTimeoutMinutes(value) {
+  const minutes = Number(value);
+  return String(
+    Number.isInteger(minutes) && minutes >= 0 && minutes <= FRONTEND_WS_TIMEOUT_MINUTES_MAX
+      ? minutes
+      : 0
   );
 }
 
@@ -498,6 +509,7 @@ export async function loadSiteSettings(db, options = {}) {
     result.long_history_points = normalizeLongHistoryPoints(result.long_history_points);
     result.resource_alert_rules = normalizeResourceAlertRules(result.resource_alert_rules);
     result.wss_report_enabled = normalizeBooleanSetting(result.wss_report_enabled);
+    result.frontend_ws_timeout_minutes = normalizeFrontendWsTimeoutMinutes(result.frontend_ws_timeout_minutes);
     result.notification_webhook_enabled = normalizeBooleanSetting(result.notification_webhook_enabled);
     result.notification_webhook_method = normalizeNotificationWebhookMethod(result.notification_webhook_method);
     result.notification_webhook_format = normalizeNotificationWebhookFormat(result.notification_webhook_format);
@@ -588,6 +600,7 @@ export async function saveSiteOptions(db, updates) {
   siteOptions.long_history_points = normalizeLongHistoryPoints(siteOptions.long_history_points);
   siteOptions.resource_alert_rules = normalizeResourceAlertRules(siteOptions.resource_alert_rules);
   siteOptions.wss_report_enabled = normalizeBooleanSetting(siteOptions.wss_report_enabled);
+  siteOptions.frontend_ws_timeout_minutes = normalizeFrontendWsTimeoutMinutes(siteOptions.frontend_ws_timeout_minutes);
   siteOptions.notification_webhook_enabled = normalizeBooleanSetting(siteOptions.notification_webhook_enabled);
   siteOptions.notification_webhook_method = normalizeNotificationWebhookMethod(siteOptions.notification_webhook_method);
   siteOptions.notification_webhook_format = normalizeNotificationWebhookFormat(siteOptions.notification_webhook_format);

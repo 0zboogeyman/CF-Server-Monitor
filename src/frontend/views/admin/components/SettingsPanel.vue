@@ -137,12 +137,27 @@
           </p>
         </div>
 
-        <div class="form-group">
-          <label class="form-label">{{ trans.longHistoryPoints }}</label>
-          <select v-model="settings.long_history_points" class="form-select">
-            <option v-for="option in longHistoryPointOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-          </select>
-          <p class="text-muted text-sm mt-1">{{ trans.longHistoryPointsTip }}</p>
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">{{ trans.frontendWsTimeoutMinutes }}</label>
+            <input
+              v-model.number="settings.frontend_ws_timeout_minutes"
+              type="number"
+              min="0"
+              :max="FRONTEND_WS_TIMEOUT_MINUTES_MAX"
+              step="1"
+              class="form-input"
+            >
+            <p class="text-muted text-sm mt-1">{{ trans.frontendWsTimeoutMinutesTip }}</p>
+          </div>
+
+          <div class="form-group flex-1">
+            <label class="form-label">{{ trans.longHistoryPoints }}</label>
+            <select v-model="settings.long_history_points" class="form-select">
+              <option v-for="option in longHistoryPointOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+            </select>
+            <p class="text-muted text-sm mt-1">{{ trans.longHistoryPointsTip }}</p>
+          </div>
         </div>
       </div>
 
@@ -582,7 +597,7 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
-import { HISTORY } from '../../../utils/constants.js'
+import { FRONTEND_WS_TIMEOUT_MINUTES_MAX, HISTORY } from '../../../utils/constants.js'
 import { currentLang } from '../../../utils/i18n.js'
 import { PING_NODE_FIELDS, validatePingNode } from '../../../utils/pingNode.js'
 
