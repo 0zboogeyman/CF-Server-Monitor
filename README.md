@@ -309,6 +309,14 @@ npm run build:github-page
 - 修改 `API_SECRET` 后，需要重新部署 Worker，并在所有服务器上重新安装或更新 Agent 命令。
 - 后台登录密码可以独立修改，建议不要长期和 `API_SECRET` 保持一致。
 
+### JWT 与 WebSocket 认证
+
+- 管理员登录成功后会签发 7 天有效期的 JWT；前端会用于后续管理请求，并设置 `cfsm_auth` HttpOnly Cookie。
+- 私有站点（`is_public !== 'true'`）会对 `/api/servers`、`/api/server`、`/api/history/all` 和 `/api/ws` 做登录校验；未授权的 WebSocket 不会转发到 Durable Object。
+- `/api/ws` 支持三种 JWT 认证来源：`Authorization: Bearer <token>`、`Cookie: cfsm_auth=<token>`、查询参数 `token` / `auth_token` / `ws_token`。
+- 浏览器原生 WebSocket 不能自定义 `Authorization` Header，内置前端同域连接走 `cfsm_auth` Cookie，跨域连接才在 URL 中追加 `token=<jwt>` 查询参数。
+- 查询参数 token 可能出现在访问日志中，请只通过 HTTPS 使用，并避免把带 token 的 WebSocket URL 分享给他人。
+
 ### Turnstile
 
 可在后台启用 Cloudflare Turnstile，用于降低公开 API 和登录入口被刷的风险。多站点模式下，如果多个站点都启用 Turnstile，请保持 Site Key 一致。

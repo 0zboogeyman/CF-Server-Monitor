@@ -39,6 +39,19 @@ export const createLiveSocket = (subscribe, handlers = {}, apiIndex = 0, serverI
     return getWsBase()
   }
 
+  const getJwtToken = () => {
+    try {
+      return localStorage.getItem('jwt_token') || ''
+    } catch (_) {
+      return ''
+    }
+  }
+
+  const isSameHostWebSocket = (url) => {
+    if (typeof window === 'undefined' || !window.location) return false
+    return url.host === window.location.host
+  }
+
   const setStatus = (connected, reason) => {
     isConnected = connected
     if (typeof onStatus === 'function') {
@@ -120,8 +133,8 @@ export const createLiveSocket = (subscribe, handlers = {}, apiIndex = 0, serverI
     try {
       const url = new URL(`${getWsBaseByIndex(apiIndex)}/api/ws`)
       url.searchParams.set('subscribe', scope)
-      const token = localStorage.getItem('jwt_token')
-      if (token) {
+      const token = getJwtToken()
+      if (token && !isSameHostWebSocket(url)) {
         url.searchParams.set('token', token)
       }
       ws = new WebSocket(url.toString())
