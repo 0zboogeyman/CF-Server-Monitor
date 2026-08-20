@@ -972,74 +972,6 @@ body::before {
     flex-wrap: wrap;
 }
 
-.quota-help {
-    display: inline-flex;
-    align-items: center;
-    position: relative;
-    outline: none;
-}
-
-.quota-help-dot {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 15px;
-    height: 15px;
-    border: 1px solid var(--border-active);
-    border-radius: 50%;
-    background: var(--bg-primary);
-    color: var(--accent-cyan);
-    cursor: help;
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 1;
-}
-
-.quota-help-tooltip {
-    position: absolute;
-    bottom: calc(100% + 8px);
-    left: 50%;
-    z-index: 30;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    width: min(360px, calc(100vw - 48px));
-    min-width: min(300px, calc(100vw - 48px));
-    padding: 9px 11px;
-    border: 1px solid var(--border-active);
-    border-radius: 4px;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.38), 0 0 12px rgba(57, 210, 192, 0.08);
-    font-size: 11px;
-    line-height: 1.45;
-    letter-spacing: 0;
-    opacity: 0;
-    pointer-events: none;
-    transform: translate(-50%, 4px);
-    transition: opacity 0.16s ease, transform 0.16s ease;
-}
-
-.quota-help-tooltip::before {
-    content: "";
-    position: absolute;
-    bottom: -5px;
-    left: 50%;
-    width: 8px;
-    height: 8px;
-    border-right: 1px solid var(--border-active);
-    border-bottom: 1px solid var(--border-active);
-    background: var(--bg-primary);
-    transform: translateX(-50%) rotate(45deg);
-}
-
-.quota-help:hover .quota-help-tooltip,
-.quota-help:focus .quota-help-tooltip,
-.quota-help:focus-within .quota-help-tooltip {
-    opacity: 1;
-    transform: translate(-50%, 0);
-}
-
 .quota-help-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
@@ -1388,6 +1320,10 @@ body::before {
 }
 
 .metric-ring-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
     margin-top: 10px;
     font-size: var(--ring-card-label-size);
     font-weight: 700;
@@ -2313,6 +2249,71 @@ body::before {
     margin-top: 4px;
 }
 
+.batch-edit-modal {
+    width: min(980px, 94vw);
+}
+
+.batch-edit-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.batch-edit-section {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.015);
+}
+
+.batch-edit-section .section-subtitle {
+    display: block;
+    margin-bottom: 10px;
+}
+
+.batch-edit-field {
+    display: grid;
+    grid-template-columns: minmax(150px, 0.82fr) minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.batch-edit-field:last-child {
+    margin-bottom: 0;
+}
+
+.batch-edit-field-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    color: var(--text-primary);
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.batch-edit-field-toggle input {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent-green);
+    flex: 0 0 auto;
+}
+
+.batch-edit-field-toggle span {
+    overflow-wrap: anywhere;
+}
+
+.batch-edit-field-control {
+    min-width: 0;
+}
+
+.batch-edit-field-control .form-input:disabled,
+.batch-edit-field-control .form-select:disabled {
+    opacity: 0.55;
+}
+
 .resource-alert-empty {
     border: 1px dashed var(--border-color);
     border-radius: 4px;
@@ -2416,6 +2417,127 @@ body::before {
     color: var(--accent-red);
 }
 
+.section-title-help {
+    display: inline-flex;
+    align-items: center;
+    margin: -10px 0 10px;
+}
+
+.inline-help-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* --------------------------------------------------------------------------
+   20. Help Tooltip Component
+   -------------------------------------------------------------------------- */
+.help-tooltip {
+    display: inline-flex;
+    align-items: center;
+    position: relative;
+    vertical-align: middle;
+    flex: 0 0 auto;
+}
+
+.help-tooltip-trigger {
+    appearance: none;
+    -webkit-appearance: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 17px;
+    height: 17px;
+    border: 1px solid color-mix(in srgb, var(--accent-cyan) 62%, var(--border-active));
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--bg-primary) 88%, var(--accent-cyan));
+    color: var(--accent-cyan);
+    cursor: help;
+    font-family: var(--terminal-font);
+    font-size: 11px;
+    font-weight: 800;
+    line-height: 1;
+    padding: 0;
+    transition: background 0.16s ease, border-color 0.16s ease, color 0.16s ease, transform 0.16s ease;
+}
+
+.help-tooltip-trigger:hover,
+.help-tooltip-trigger:focus-visible,
+.help-tooltip.is-open .help-tooltip-trigger {
+    background: var(--accent-cyan);
+    border-color: var(--accent-cyan);
+    color: var(--color-inherit);
+    outline: none;
+    transform: translateY(-1px);
+}
+
+.help-tooltip-panel {
+    position: fixed;
+    left: 12px;
+    top: 12px;
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: max-content;
+    max-width: min(360px, calc(100vw - 40px));
+    padding: 10px 12px;
+    border: 1px solid color-mix(in srgb, var(--border-active) 82%, var(--accent-cyan));
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--bg-primary) 94%, black);
+    color: var(--text-primary);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.42), 0 0 18px rgba(57, 210, 192, 0.12);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.5;
+    letter-spacing: 0;
+    opacity: 1;
+    pointer-events: auto;
+    text-align: left;
+    text-transform: none;
+    transform: translateY(0);
+    transition: opacity 0.16s ease, transform 0.16s ease;
+    white-space: normal;
+}
+
+.help-tooltip-panel::before {
+    content: "";
+    position: absolute;
+    left: var(--tooltip-arrow-left, 50%);
+    width: 9px;
+    height: 9px;
+    border-color: color-mix(in srgb, var(--border-active) 82%, var(--accent-cyan));
+    background: color-mix(in srgb, var(--bg-primary) 94%, black);
+    transform: translateX(-50%) rotate(45deg);
+}
+
+.help-tooltip-floating-top::before {
+    bottom: -5px;
+    border-right: 1px solid;
+    border-bottom: 1px solid;
+}
+
+.help-tooltip-floating-bottom::before {
+    top: -5px;
+    border-left: 1px solid;
+    border-top: 1px solid;
+}
+
+.help-tooltip-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 14px;
+    align-items: start;
+}
+
+.help-tooltip-label {
+    color: var(--text-secondary);
+}
+
+.help-tooltip-value {
+    white-space: nowrap;
+}
+
 .form-input,
 .form-select,
 .form-textarea {
@@ -2473,18 +2595,18 @@ body::before {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 10px 12px;
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    margin-bottom: 8px;
+    min-height: 35px;
+    padding: 8px 0;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    margin-bottom: 14px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: color 0.2s;
 }
 
 .checkbox-item:hover {
-    border-color: var(--border-active);
-    background: var(--bg-hover);
+    color: var(--accent-cyan);
 }
 
 .checkbox-item input[type="checkbox"] {
@@ -2497,7 +2619,16 @@ body::before {
 .checkbox-item label {
     font-size: 12px;
     cursor: pointer;
-    flex: 1;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.checkbox-item.form-group {
+    margin-bottom: 14px;
+}
+
+.checkbox-item .help-tooltip {
+    margin-left: -4px;
 }
 
 .checkbox-item .checkbox-badge {
@@ -2545,6 +2676,7 @@ body::before {
     padding: 24px;
     position: relative;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    overflow-x: hidden;
     overflow-y: auto;
 }
 
@@ -4479,6 +4611,24 @@ body.mikus-theme .mikus-stats-mascot-img {
         padding: 8px;
     }
 
+    .help-tooltip-panel {
+        left: 12px !important;
+        right: 12px;
+        top: auto !important;
+        bottom: 14px;
+        width: auto;
+        max-width: none;
+        max-height: min(52vh, 360px);
+        overflow: auto;
+        padding: 12px 14px;
+        transform: translateY(8px);
+        z-index: 300;
+    }
+
+    .help-tooltip-panel::before {
+        display: none;
+    }
+
     .btn, .tab-btn{
         padding: 8px;
     }
@@ -4567,6 +4717,15 @@ body.mikus-theme .mikus-stats-mascot-img {
 
     .settings-grid {
         grid-template-columns: 1fr;
+    }
+
+    .batch-edit-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .batch-edit-field {
+        grid-template-columns: 1fr;
+        gap: 6px;
     }
 
     .settings-section {

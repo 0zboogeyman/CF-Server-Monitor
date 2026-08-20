@@ -52,7 +52,6 @@
           class="metric-ring-chart metric-ring-chart-memory"
           :class="{ 'has-swap-ring': hasSwapData }"
           :style="getMemoryRingStyle(ramPercent, getUsageColor(ramPercent), swapPercent, getUsageColor(swapPercent))"
-          :title="memoryUsageTitle"
         >
           <span class="metric-ring-track"></span>
           <span class="metric-ring-progress"></span>
@@ -65,7 +64,10 @@
             <span v-if="hasSwapData" class="metric-ring-center-swap">{{ roundedPercent(swapPercent) }}%</span>
           </span>
         </div>
-        <div class="metric-ring-label">RAM</div>
+        <div class="metric-ring-label">
+          RAM
+          <HelpTooltip :text="memoryUsageTitle" passive />
+        </div>
         <div class="metric-ring-subtext">{{ ramUsageText }}</div>
       </div>
 
@@ -154,6 +156,7 @@
 
 <script setup>
 import OsIcon from './OsIcon.vue'
+import HelpTooltip from './HelpTooltip.vue'
 import { DEFAULT_SERVER_CARD_CONFIG, useServerCardData } from '../composables/useServerCardData'
 
 const props = defineProps({

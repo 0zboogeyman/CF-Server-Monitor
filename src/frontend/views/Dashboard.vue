@@ -175,10 +175,11 @@
                 </span>
                 {{ (server.region || 'XX').toUpperCase() }}
               </td>
-              <td :title="getSystemTitle(server)">
+              <td>
                 <span class="table-system-info">
                   <OsIcon :os="server.os" />
                   <span class="os-label">{{ formatSystemOs(server.os) }} / {{ server.arch || 'N/A' }} </span>
+                  <HelpTooltip :text="getSystemTitle(server)" />
                 </span>
               </td>
               <td>
@@ -215,7 +216,7 @@
               </td>
               <td v-else>-</td>
               <td class="table-conn-cell">
-                <span class="conn-pair" title="TCP / UDP">{{ formatConnPair(server) }}</span>
+                <span class="conn-pair">{{ formatConnPair(server) }}</span>
               </td>
               <td>{{ formatBytes(server.net_in_speed) }}/s</td>
               <td>{{ formatBytes(server.net_out_speed) }}/s</td>
@@ -323,6 +324,7 @@ import TerminalHeader from '../components/TerminalHeader.vue'
 import ServerBarCard from '../components/ServerBarCard.vue'
 import ServerRingCard from '../components/ServerRingCard.vue'
 import Footer from '../components/Footer.vue'
+import HelpTooltip from '../components/HelpTooltip.vue'
 import OsIcon from '../components/OsIcon.vue'
 import LiveConnectionTimeoutModal from '../components/LiveConnectionTimeoutModal.vue'
 import { fetchConfig, fetchServersAll, fetchServersAllWithProgress, formatBytes, createLiveSocket, getFlagRegionCode, getApiBases, isServerOnline, normalizeLiveSocketTimeoutMinutes } from '../utils/api.js'
