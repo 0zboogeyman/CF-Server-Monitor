@@ -1623,6 +1623,97 @@ body::before {
     font-weight: 700;
 }
 
+.three-net-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 8px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+.three-net-panel-ring {
+    margin-top: 12px;
+    padding: 0;
+    background: transparent;
+    border: 0;
+}
+
+.three-net-columns {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.three-net-column {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.three-net-row {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.three-net-head {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 6px;
+}
+
+.three-net-head-loss {
+    justify-content: flex-end;
+}
+
+.three-net-name {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-secondary);
+    font-size: 10.5px;
+    font-weight: 640;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.three-net-value {
+    flex: 0 0 auto;
+    font-size: 11.5px;
+    font-weight: 720;
+    white-space: nowrap;
+}
+
+.three-net-buckets {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 11px;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.three-net-bucket {
+    display: inline-flex;
+    flex: 1 1 0;
+    min-width: 0;
+    height: 100%;
+    align-items: flex-end;
+}
+
+.three-net-bucket-fill {
+    display: block;
+    width: 100%;
+    min-height: 2px;
+    border-radius: 2px;
+}
+
 .net-indicator {
     display: flex;
     gap: 16px;

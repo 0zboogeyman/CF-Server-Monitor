@@ -814,6 +814,8 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
             siteOptions[field] = normalizedResourceAlertRules;
           } else if (field === 'wss_report_enabled') {
             siteOptions[field] = normalizeBooleanSetting(settings[field]);
+          } else if (field === 'show_three_net_details') {
+            siteOptions[field] = normalizeBooleanSetting(settings[field]);
           } else if (field === 'notification_webhook_enabled') {
             siteOptions[field] = normalizeBooleanSetting(settings[field]);
           } else if (field === 'notification_webhook_method') {
