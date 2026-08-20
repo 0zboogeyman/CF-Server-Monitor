@@ -14,7 +14,7 @@
       :aria-label="ariaLabel"
       :aria-expanded="open ? 'true' : 'false'"
       @click.stop="toggle"
-      @focus="openTooltip"
+      @focus="handleFocus"
       @blur="closeSoon"
     >?</button>
     <span
@@ -26,7 +26,7 @@
       :aria-label="ariaLabel"
       :aria-expanded="open ? 'true' : 'false'"
       @click.prevent.stop="toggle"
-      @focus="openTooltip"
+      @focus="handleFocus"
       @keydown.enter.prevent.stop="toggle"
       @keydown.space.prevent.stop="toggle"
       @blur="closeSoon"
@@ -117,6 +117,11 @@ const openTooltip = () => {
     open.value = true
   }
   updatePosition()
+}
+
+const handleFocus = () => {
+  if (isMobileViewport()) return
+  openTooltip()
 }
 
 const closeTooltip = () => {

@@ -24,6 +24,10 @@ import {
   serializeCorrection
 } from '../utils/agentConfig.js';
 import { scheduleAgentConfigChanged } from '../utils/agentConfigNotify.js';
+import {
+  BROADCAST_DELETE_FIELDS,
+  HISTORY_METRIC_AGGREGATION_POLICY
+} from '../utils/historyFields.js';
 
 // 将最新一次上报打包成前端可直接消费的 "当前状态" 对象
 // 与 /api/server 和 /api/servers 返回的字段保持一致，便于页面直接合并
@@ -43,21 +47,6 @@ const REALTIME_BATCH_WINDOW_MS = 5 * 1000;
 const RESOURCE_ALERT_BATCH_WINDOW_MS = 25 * 1000;
 const MAX_BATCH_SAMPLES = 300;
 const FRONTEND_SUBSCRIBER_CHECK_INTERVAL_MS = 5 * 60 * 1000;
-const HISTORY_AGGREGATION_MAX_FIELDS = [
-  'net_in_speed', 'net_out_speed',
-  'disk_read_bps', 'disk_write_bps', 'disk_read_iops',
-  'disk_write_iops', 'disk_await_ms', 'disk_util',
-  'processes', 'tcp_conn', 'udp_conn'
-];
-const HISTORY_AGGREGATION_AVG_FIELDS = [
-  'cpu', 'ram_used', 'swap_used',
-  'ping_ct', 'ping_cu', 'ping_cm', 'ping_bd',
-  'loss_ct', 'loss_cu', 'loss_cm', 'loss_bd'
-];
-const HISTORY_METRIC_AGGREGATION_POLICY = Object.freeze({
-  ...Object.fromEntries(HISTORY_AGGREGATION_MAX_FIELDS.map(field => [field, 'max'])),
-  ...Object.fromEntries(HISTORY_AGGREGATION_AVG_FIELDS.map(field => [field, 'avg']))
-});
 const DISK_IO_COLUMN_TO_FIELD = Object.freeze(Object.fromEntries(
   DISK_IO_METRIC_FIELDS.map(field => [DISK_IO_FIELD_TO_COLUMN[field], field])
 ));
@@ -67,9 +56,6 @@ let flushTimer = null;
 let flushDueAt = 0;
 let resolveFlushingPromise = null;
 let frontendSubscriberSnapshot = { checkedAt: 0, count: 0 };
-
-// 用于过滤不需要实时更新的字段
-const BROADCAST_DELETE_FIELDS = ['id', 'name', 'region', 'arch', 'os', 'kernel_version', 'cpu_info', 'cpu_cores', 'expire_date', 'server_group', 'traffic_limit', 'net_rx_monthly', 'net_tx_monthly', 'boot_time', 'timestamp', 'ip_v4', 'ip_v6'];
 
 function normalizeTimestamp(value, fallback = Date.now()) {
   const ts = Number(value);

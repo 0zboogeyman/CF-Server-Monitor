@@ -4622,7 +4622,7 @@ body.mikus-theme .mikus-stats-mascot-img {
         overflow: auto;
         padding: 12px 14px;
         transform: translateY(8px);
-        z-index: 300;
+        z-index: 10030;
     }
 
     .help-tooltip-panel::before {
