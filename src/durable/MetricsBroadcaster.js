@@ -1285,6 +1285,19 @@ export class MetricsBroadcaster {
 
     if (msg?.type === 'pong') return;
 
+    const scheduleCheckAfter = Number(attachment.wssScheduleCheckAfter);
+    if (Number.isFinite(scheduleCheckAfter) && Date.now() >= scheduleCheckAfter) {
+      const settings = await loadSiteSettings(this.env.DB);
+      if (!isWssReportEnabled(settings)) {
+        this._closeWsWithError(ws, 'Agent WSS report disabled for current hour', 403);
+        return;
+      }
+      const nextHour = new Date();
+      nextHour.setUTCMinutes(60, 0, 0);
+      attachment = { ...attachment, wssScheduleCheckAfter: nextHour.getTime() };
+      ws.serializeAttachment(attachment);
+    }
+
     const data = this._normalizeAgentReportData(msg);
     if (!data) {
       this._closeWsWithError(ws, 'Invalid report payload', 400);
@@ -1376,6 +1389,8 @@ export class MetricsBroadcaster {
     }
 
     // @ts-ignore - Cloudflare Workers runtime provides WebSocketPair
+    const nextHour = new Date();
+    nextHour.setUTCMinutes(60, 0, 0);
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair);
     const agentSocket = this._acceptStandardAgentWebSocket(server, {
@@ -1387,6 +1402,7 @@ export class MetricsBroadcaster {
       agentVersion: normalizeAgentVersion(request.headers.get('X-Agent-Version')),
       reportIntervalMs: DEFAULT_AGENT_HISTORY_WRITE_INTERVAL_MS,
       wssReportIntervalMs: DEFAULT_WSS_REPORT_INTERVAL * 1000,
+      wssScheduleCheckAfter: nextHour.getTime(),
       lastD1WriteTs: 0,
       configSchema: normalizeConfigSchema(firstDefined(
         url.searchParams.get('config_schema'),

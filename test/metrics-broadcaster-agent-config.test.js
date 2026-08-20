@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MetricsBroadcaster } from '../src/durable/MetricsBroadcaster.js';
-import { getHistoryMetrics, handleWebSocketUpgrade } from '../src/handlers/update.js';
+import { getHistoryMetrics, handleUpdateWebSocketUpgrade, handleWebSocketUpgrade } from '../src/handlers/update.js';
 import { buildAuthCookie, generateToken } from '../src/middleware/auth.js';
 import { buildResourceAlertNotificationPayloads } from '../src/services/notification.js';
-import { DEFAULT_NOTIFICATION_TEMPLATE, normalizeNotificationTemplate, normalizeResourceAlertRules } from '../src/utils/settings.js';
+import { clearSiteSettingsCache, DEFAULT_NOTIFICATION_TEMPLATE, normalizeNotificationTemplate, normalizeResourceAlertRules } from '../src/utils/settings.js';
 
 globalThis.WebSocketRequestResponsePair = class WebSocketRequestResponsePair {
   constructor(request, response) {
@@ -165,6 +165,39 @@ test('private frontend WebSocket accepts auth cookie', async () => {
 
   assert.equal(response.status, 101);
   assert.equal(forwarded, true);
+});
+
+test('Agent WSS upgrade follows the configured UTC hour schedule', async () => {
+  const currentHour = new Date().getUTCHours();
+  let forwarded = false;
+  clearSiteSettingsCache();
+  const enabledResponse = await handleUpdateWebSocketUpgrade(
+    makeWebSocketUpgradeRequest('https://example.com/update'),
+    makeWebSocketEnv({
+      wss_report_enabled: 'true',
+      wss_report_hours: [currentHour]
+    }, () => {
+      forwarded = true;
+    })
+  );
+
+  assert.equal(enabledResponse.status, 101);
+  assert.equal(forwarded, true);
+
+  clearSiteSettingsCache();
+  forwarded = false;
+  const disabledResponse = await handleUpdateWebSocketUpgrade(
+    makeWebSocketUpgradeRequest('https://example.com/update'),
+    makeWebSocketEnv({
+      wss_report_enabled: 'true',
+      wss_report_hours: [(currentHour + 1) % 24]
+    }, () => {
+      forwarded = true;
+    })
+  );
+
+  assert.equal(disabledResponse.status, 403);
+  assert.equal(forwarded, false);
 });
 
 test('WSS agent config state only requests ack for fields in current report', () => {
@@ -511,6 +544,46 @@ test('agent report mode change closes existing Agent WSS when disabled', async (
   assert.deepEqual(closed, [{
     code: 1008,
     reason: 'Agent WSS report disabled'
+  }]);
+});
+
+test('Agent WSS closes on the first report after entering a disabled UTC hour', async () => {
+  clearSiteSettingsCache();
+  const currentHour = new Date().getUTCHours();
+  const sent = [];
+  const closed = [];
+  let attachment = {
+    kind: 'agent-report',
+    authenticated: true,
+    serverId: 'server-1',
+    wssScheduleCheckAfter: Date.now() - 1
+  };
+  const ws = {
+    serializeAttachment(value) {
+      attachment = value;
+    },
+    send(message) {
+      sent.push(JSON.parse(message));
+    },
+    close(code, reason) {
+      closed.push({ code, reason });
+    }
+  };
+  const broadcaster = makeBroadcaster([], {
+    DB: makeSettingsDb({
+      wss_report_enabled: 'true',
+      wss_report_hours: [(currentHour + 1) % 24]
+    })
+  });
+
+  await broadcaster._handleAgentReportMessage(ws, JSON.stringify({ metrics: { cpu: 1 } }), attachment);
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].type, 'error');
+  assert.equal(sent[0].code, 403);
+  assert.deepEqual(closed, [{
+    code: 1008,
+    reason: 'Agent WSS report disabled for current hour'
   }]);
 });
 
