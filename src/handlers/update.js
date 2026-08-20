@@ -8,7 +8,7 @@ import {
 } from '../utils/metrics.js';
 import { createErrorResponse, createUnauthorizedResponse, createNotFoundResponse, createBadRequestResponse } from '../utils/errors.js';
 import { ensureServerOptimization } from '../database/indexOptimization.js';
-import { getResourceAlertConfig, isWssReportEnabled, loadSiteSettings } from '../utils/settings.js';
+import { getResourceAlertConfig, isWssReportEnabled, loadSiteSettings, normalizeBooleanSetting } from '../utils/settings.js';
 import { cacheLatestReportUpdate } from '../utils/latestReportCache.js';
 import {
   hasRecentFrontendRealtimeActivity,
@@ -329,13 +329,20 @@ async function getCachedFrontendSubscriberCount(env) {
   return count;
 }
 
+function hasResourceAlertNotificationTarget(settings = {}) {
+  if (normalizeBooleanSetting(settings.notification_webhook_enabled) === 'true') {
+    return String(settings.notification_webhook_url || '').trim().length > 0;
+  }
+  return String(settings.tg_bot_token || '').trim().length > 0;
+}
+
 async function getRealtimeBatchIntent(env) {
   if (!env?.METRICS_BROADCASTER) return null;
 
   let resourceAlertEnabled = false;
   try {
     const settings = await loadSiteSettings(env.DB);
-    resourceAlertEnabled = !!settings?.tg_bot_token && getResourceAlertConfig(settings).enabled;
+    resourceAlertEnabled = hasResourceAlertNotificationTarget(settings) && getResourceAlertConfig(settings).enabled;
   } catch (e) {
     console.warn('[broadcast] failed to load realtime gate settings:', e?.message || e);
   }
@@ -371,7 +378,7 @@ async function getBatchFlushDelayMs(env, now = Date.now()) {
 
   try {
     const settings = await loadSiteSettings(env.DB);
-    if (settings?.tg_bot_token && getResourceAlertConfig(settings).enabled) {
+    if (hasResourceAlertNotificationTarget(settings) && getResourceAlertConfig(settings).enabled) {
       return RESOURCE_ALERT_BATCH_WINDOW_MS;
     }
   } catch (e) {
