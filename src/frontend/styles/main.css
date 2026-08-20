@@ -1076,7 +1076,7 @@ body::before {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: 4px;
-    padding: 16px;
+    padding: 14px;
     text-decoration: none;
     color: inherit;
     transition: all 0.2s;
@@ -1097,7 +1097,7 @@ body::before {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
 }
 
 .server-space {
@@ -1136,7 +1136,7 @@ body::before {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     color: var(--text-primary);
     font-size: 12px;
 }
@@ -1273,7 +1273,7 @@ body::before {
     display: flex;
     flex-direction: column;
     gap: 0;
-    padding: 16px;
+    padding: 14px;
     border-radius: 8px;
     background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.006) 30%, rgba(0, 0, 0, 0.02) 100%), var(--bg-secondary);
     border-color: rgba(255, 255, 255, 0.15);
@@ -1285,7 +1285,7 @@ body::before {
 
 
 .server-card-ring-divider {
-    margin: 14px 0 16px;
+    margin: 12px 0 14px;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -1403,8 +1403,8 @@ body::before {
 }
 
 .server-card-network-panel {
-    margin-top: 22px;
-    padding: 14px;
+    margin-top: 16px;
+    padding: 12px;
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid rgba(255, 255, 255, 0.04);
@@ -1416,11 +1416,11 @@ body::before {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding-bottom: 10px;
+    padding-bottom: 8px;
 }
 
 .server-card-network-row + .server-card-network-row {
-    padding-top: 10px;
+    padding-top: 8px;
     border-top: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -1517,7 +1517,7 @@ body::before {
    13. Stat Bar Components
    -------------------------------------------------------------------------- */
 .server-stats {
-    margin-bottom: 12px;
+    margin-bottom: 8px;
 }
 
 .stat-row {
@@ -1525,7 +1525,7 @@ body::before {
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
 }
 
 .stat-key {
@@ -1548,6 +1548,10 @@ body::before {
 .stat-content:not(.stat-content-meter) {
     flex-wrap: wrap;
     row-gap: 2px;
+}
+
+.stat-content-conn {
+    flex-wrap: nowrap;
 }
 
 .stat-content-meter {
@@ -1814,12 +1818,13 @@ body::before {
 .terminal-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 12px;
+    font-size: 11px;
+    min-width: 980px;
 }
 
 .terminal-table th {
     background: var(--bg-card);
-    padding: 10px 10px;
+    padding: 8px 8px;
     text-align: left;
     color: var(--text-primary);
     font-weight: 600;
@@ -1830,7 +1835,7 @@ body::before {
 }
 
 .terminal-table td {
-    padding: 10px 10px;
+    padding: 7px 8px;
     border-bottom: 1px solid var(--border-color);
     vertical-align: middle;
 }
@@ -1842,7 +1847,50 @@ body::before {
 .table-stat {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.table-stat .stat-value,
+.table-stat > span {
+    min-width: 38px;
+    text-align: right;
+}
+
+.table-usage-bar {
+    width: 48px;
+    min-width: 48px;
+    flex: 0 0 48px;
+}
+
+.table-server-name {
+    display: inline-block;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.table-col-conn {
+    width: 118px;
+}
+
+.table-conn-cell {
+    white-space: nowrap;
+}
+
+.table-system-info {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.conn-pair {
+    display: inline-flex;
+    align-items: baseline;
+    font-weight: 700;
 }
 
 .tag-list {
@@ -3554,7 +3602,9 @@ body.server-row-drag-active * {
     vertical-align: middle;
     border-radius: 2px;
     filter: brightness(0.9);
-    width: 24px;
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
 }
 
 .country-os-icons {
@@ -3568,6 +3618,7 @@ body.server-row-drag-active * {
     display: inline-flex;
     align-items: center;
     line-height: 1;
+    width: 18px;
 }
 
 .os-icon-img {

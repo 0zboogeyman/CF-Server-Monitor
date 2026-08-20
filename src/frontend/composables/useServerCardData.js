@@ -46,6 +46,12 @@ const trimFixed = (value, digits = 1) => {
   return number.toFixed(digits).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1')
 }
 
+const formatCount = (value) => {
+  const number = Number.parseInt(value, 10)
+  if (!Number.isFinite(number) || number < 0) return '0'
+  return number.toLocaleString('en-US')
+}
+
 export const getTrafficUsageBytes = (server) => {
   const rx = parseFloat(server.net_rx_monthly) || 0
   const tx = parseFloat(server.net_tx_monthly) || 0
@@ -152,6 +158,9 @@ export function useServerCardData(props) {
 
   const netInSpeed = computed(() => formatBytes(props.server.net_in_speed))
   const netOutSpeed = computed(() => formatBytes(props.server.net_out_speed))
+  const tcpConn = computed(() => formatCount(props.server.tcp_conn))
+  const udpConn = computed(() => formatCount(props.server.udp_conn))
+  const connPair = computed(() => `${tcpConn.value} / ${udpConn.value}`)
   const totalRx = computed(() => formatBytes(props.server.net_rx))
   const totalTx = computed(() => formatBytes(props.server.net_tx))
   const totalRxMonthly = computed(() => formatBytes(props.server.net_rx_monthly))
@@ -274,7 +283,8 @@ export function useServerCardData(props) {
     if (!isPingValid(ping)) return 'var(--accent-red)'
     const val = parseInt(ping)
     if (val < PING.GOOD_THRESHOLD) return 'var(--accent-green)'
-    if (val < PING.WARNING_THRESHOLD) return 'var(--accent-yellow)'
+    if (val < PING.WARNING_THRESHOLD) return 'var(--accent-blue)'
+    if (val < PING.CRITICAL_THRESHOLD) return 'var(--accent-yellow)'
     return 'var(--accent-red)'
   }
 
@@ -434,6 +444,9 @@ export function useServerCardData(props) {
     hasPublicIPv6,
     netInSpeed,
     netOutSpeed,
+    tcpConn,
+    udpConn,
+    connPair,
     totalRx,
     totalTx,
     totalRxMonthly,
