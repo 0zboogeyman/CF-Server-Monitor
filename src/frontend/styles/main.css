@@ -1696,15 +1696,21 @@ body::before {
     gap: 2px;
     height: 11px;
     min-width: 0;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .three-net-bucket {
+    position: relative;
     display: inline-flex;
     flex: 1 1 0;
     min-width: 0;
     height: 100%;
     align-items: flex-end;
+    z-index: 1;
+}
+
+.three-net-buckets:hover .three-net-bucket-fill {
+    opacity: .34 !important;
 }
 
 .three-net-bucket-fill {
@@ -1712,6 +1718,75 @@ body::before {
     width: 100%;
     min-height: 2px;
     border-radius: 2px;
+    transform-origin: bottom center;
+    transition:
+        opacity .28s cubic-bezier(.2, .8, .2, 1),
+        transform .28s cubic-bezier(.2, .8, .2, 1),
+        filter .28s cubic-bezier(.2, .8, .2, 1),
+        box-shadow .28s cubic-bezier(.2, .8, .2, 1);
+}
+
+.three-net-bucket:hover {
+    z-index: 20;
+}
+
+.three-net-bucket:hover .three-net-bucket-fill {
+    opacity: 1 !important;
+    transform: scaleY(1.28);
+    filter: saturate(1.2) brightness(1.08);
+    box-shadow: 0 0 8px currentColor;
+}
+
+.three-net-bucket::before,
+.three-net-bucket::after {
+    position: absolute;
+    left: 50%;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-50%, 3px) scale(.98);
+    transition:
+        opacity .22s cubic-bezier(.2, .8, .2, 1),
+        transform .22s cubic-bezier(.2, .8, .2, 1);
+}
+
+.three-net-bucket::before {
+    content: attr(data-tooltip);
+    bottom: calc(100% + 9px);
+    z-index: 30;
+    max-width: 180px;
+    padding: 6px 8px;
+    border: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--bg-primary) 94%, black);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, .28);
+    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 650;
+    line-height: 1.25;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.three-net-bucket::after {
+    content: "";
+    bottom: calc(100% + 4px);
+    z-index: 29;
+    width: 8px;
+    height: 8px;
+    border-right: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--border-color) 72%, transparent);
+    background: color-mix(in srgb, var(--bg-primary) 94%, black);
+    transform: translate(-50%, 3px) rotate(45deg) scale(.98);
+}
+
+.three-net-bucket:hover::before,
+.three-net-bucket:hover::after {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+}
+
+.three-net-bucket:hover::after {
+    transform: translate(-50%, 0) rotate(45deg) scale(1);
 }
 
 .net-indicator {

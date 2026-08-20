@@ -40,6 +40,12 @@ const formatPercentValue = (value) => {
   return `${Number.isInteger(number) ? number : number.toFixed(1)}%`
 }
 
+const trimFixed = (value, digits = 1) => {
+  const number = Number(value)
+  if (!Number.isFinite(number)) return ''
+  return number.toFixed(digits).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1')
+}
+
 export const getTrafficUsageBytes = (server) => {
   const rx = parseFloat(server.net_rx_monthly) || 0
   const tx = parseFloat(server.net_tx_monthly) || 0
@@ -283,6 +289,31 @@ export function useServerCardData(props) {
 
   const formatPingValue = (value) => isPingValid(value) ? `${Math.round(Number(value))}ms` : trans.value.timeout
   const formatLossValue = (value) => formatPercentValue(normalizeProbeMetricValue(value))
+  const noSampleText = computed(() => currentLang.value === 'zh' ? '无样本' : 'No samples')
+
+  const formatLatencyTimeText = (timestamp) => {
+    const startTs = normalizeLatencyTimestamp(timestamp, 0)
+    if (!startTs) return ''
+    const date = new Date(startTs)
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  }
+
+  const formatBucketTooltip = (timestamp, summary) => {
+    const timeText = formatLatencyTimeText(timestamp)
+    return timeText ? `${timeText} · ${summary}` : summary
+  }
+
+  const formatPingBucketSummary = (hasPing, ping, offline) => {
+    if (offline) return trans.value.offline
+    if (hasPing) return `${trimFixed(ping, 1)} ms`
+    return noSampleText.value
+  }
+
+  const formatLossBucketSummary = (hasLoss, loss, offline) => {
+    if (offline) return trans.value.offline
+    if (hasLoss) return `${trimFixed(loss, 1)}%`
+    return noSampleText.value
+  }
 
   const getLatencySeries = (seriesName, key) => {
     const source = Array.isArray(props.server[seriesName]) ? props.server[seriesName] : []
@@ -329,11 +360,16 @@ export function useServerCardData(props) {
       const lossSeries = getLatencySeries('loss', def.key)
       const pointCount = Math.max(pingSeries.length, lossSeries.length, getLatencyWindowPointCount())
       const points = Array.from({ length: pointCount }, (_, index) => {
-        const ping = pingSeries[index]?.value ?? null
-        const loss = lossSeries[index]?.value ?? null
+        const pingPoint = pingSeries[index] ?? null
+        const lossPoint = lossSeries[index] ?? null
+        const ping = pingPoint?.value ?? null
+        const loss = lossPoint?.value ?? null
+        const timestamp = pingPoint?.ts ?? lossPoint?.ts ?? null
         const hasPing = typeof ping === 'number' && Number.isFinite(ping) && ping >= 0
         const hasLoss = typeof loss === 'number' && Number.isFinite(loss)
         const offline = !hasPing && !hasLoss
+        const pingSummary = formatPingBucketSummary(hasPing, ping, offline)
+        const lossSummary = formatLossBucketSummary(hasLoss, loss, offline)
         return {
           ping,
           loss,
@@ -343,7 +379,8 @@ export function useServerCardData(props) {
           lossColor: offline ? 'var(--accent-red)' : getLossColor(loss),
           pingOpacity: hasPing ? 0.94 : (offline ? 0.52 : 0.55),
           lossOpacity: hasLoss ? 0.94 : (offline ? 0.52 : 0.42),
-          title: offline ? `${label} ${trans.value.offline}` : `${label} ${formatPingValue(ping)} / Loss ${formatLossValue(loss)}`
+          pingTooltip: formatBucketTooltip(timestamp, pingSummary),
+          lossTooltip: formatBucketTooltip(timestamp, lossSummary)
         }
       })
       const hasMeasuredPoint = points.some(point => (
