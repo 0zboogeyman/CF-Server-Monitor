@@ -261,11 +261,6 @@ export function useServerCardData(props) {
     '--swap-ring-color': swapColor
   })
 
-  const memoryUsageTitle = computed(() => hasSwapData.value
-    ? `RAM ${ramPercent.value.toFixed(1)}% · SWAP ${swapPercent.value.toFixed(1)}%`
-    : `RAM ${ramPercent.value.toFixed(1)}%`
-  )
-
   const roundedPercent = (value) => Math.round(clampPercent(value))
 
   const isPingValid = (ping) => {
@@ -385,9 +380,9 @@ export function useServerCardData(props) {
           loss,
           pingHeight: hasPing ? 84 : 25,
           lossHeight: 84,
-          pingColor: offline ? 'var(--accent-red)' : (hasPing ? getPingColor(ping) : 'var(--border-color)'),
+          pingColor: hasPing ? getPingColor(ping) : 'var(--accent-red)',
           lossColor: offline ? 'var(--accent-red)' : getLossColor(loss),
-          pingOpacity: hasPing ? 0.94 : (offline ? 0.52 : 0.55),
+          pingOpacity: hasPing ? 0.94 : 0.52,
           lossOpacity: hasLoss ? 0.94 : (offline ? 0.52 : 0.42),
           pingTooltip: formatBucketTooltip(timestamp, pingSummary),
           lossTooltip: formatBucketTooltip(timestamp, lossSummary)
@@ -457,7 +452,6 @@ export function useServerCardData(props) {
     uptimeText,
     ramUsageText,
     diskUsageText,
-    memoryUsageTitle,
     isExpired,
     expireText,
     getUsageColor,

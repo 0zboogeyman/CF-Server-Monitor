@@ -60,13 +60,12 @@
       <div class="settings-section" v-if="currentOrigin === selectedApiBase">
         <div class="section-title"><span>▸</span> {{ trans.appearance }} 2</div>
 
-        <div class="section-title-help">
-          <HelpTooltip :text="trans.cspWarning" />
-        </div>
-
         <div class="form-row">
           <div class="form-group flex-1">
-            <label class="form-label">{{ trans.customHead }}</label>
+            <label class="form-label">
+              {{ trans.customHead }}
+              <HelpTooltip :text="trans.cspWarning" />
+            </label>
             <textarea v-model="settings.custom_head" class="form-textarea" rows="3" placeholder="<link rel='stylesheet' href='...'">
             </textarea>
           </div>

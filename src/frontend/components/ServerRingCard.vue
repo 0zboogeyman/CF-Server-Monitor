@@ -64,10 +64,7 @@
             <span v-if="hasSwapData" class="metric-ring-center-swap">{{ roundedPercent(swapPercent) }}%</span>
           </span>
         </div>
-        <div class="metric-ring-label">
-          RAM
-          <HelpTooltip :text="memoryUsageTitle" passive />
-        </div>
+        <div class="metric-ring-label">RAM</div>
         <div class="metric-ring-subtext">{{ ramUsageText }}</div>
       </div>
 
@@ -156,7 +153,6 @@
 
 <script setup>
 import OsIcon from './OsIcon.vue'
-import HelpTooltip from './HelpTooltip.vue'
 import { DEFAULT_SERVER_CARD_CONFIG, useServerCardData } from '../composables/useServerCardData'
 
 const props = defineProps({
@@ -197,7 +193,6 @@ const {
   expireDateTitle,
   loadAvg,
   ramUsageText,
-  memoryUsageTitle,
   diskUsageText,
   getUsageColor,
   getRingStyle,

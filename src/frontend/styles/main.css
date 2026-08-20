@@ -2513,14 +2513,18 @@ body::before {
 
 .help-tooltip-floating-top::before {
     bottom: -5px;
-    border-right: 1px solid;
-    border-bottom: 1px solid;
+    border-right-width: 1px;
+    border-right-style: solid;
+    border-bottom-width: 1px;
+    border-bottom-style: solid;
 }
 
 .help-tooltip-floating-bottom::before {
     top: -5px;
-    border-left: 1px solid;
-    border-top: 1px solid;
+    border-left-width: 1px;
+    border-left-style: solid;
+    border-top-width: 1px;
+    border-top-style: solid;
 }
 
 .help-tooltip-row {

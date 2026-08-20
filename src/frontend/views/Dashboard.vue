@@ -179,7 +179,6 @@
                 <span class="table-system-info">
                   <OsIcon :os="server.os" />
                   <span class="os-label">{{ formatSystemOs(server.os) }} / {{ server.arch || 'N/A' }} </span>
-                  <HelpTooltip :text="getSystemTitle(server)" />
                 </span>
               </td>
               <td>
@@ -324,7 +323,6 @@ import TerminalHeader from '../components/TerminalHeader.vue'
 import ServerBarCard from '../components/ServerBarCard.vue'
 import ServerRingCard from '../components/ServerRingCard.vue'
 import Footer from '../components/Footer.vue'
-import HelpTooltip from '../components/HelpTooltip.vue'
 import OsIcon from '../components/OsIcon.vue'
 import LiveConnectionTimeoutModal from '../components/LiveConnectionTimeoutModal.vue'
 import { fetchConfig, fetchServersAll, fetchServersAllWithProgress, formatBytes, createLiveSocket, getFlagRegionCode, getApiBases, isServerOnline, normalizeLiveSocketTimeoutMinutes } from '../utils/api.js'
@@ -526,8 +524,6 @@ const formatSystemOs = (value) => {
     .replace(/\s+/g, ' ')
     .trim() || raw
 }
-
-const getSystemTitle = (server) => `${server.os || 'N/A'} / ${server.arch || 'N/A'}`
 
 const getUpdateTime = (lastUpdated) => {
   if (!lastUpdated) return '-'

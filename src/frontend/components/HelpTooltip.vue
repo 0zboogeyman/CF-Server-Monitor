@@ -2,8 +2,8 @@
   <span
     class="help-tooltip"
     :class="[`help-tooltip-${resolvedPlacement}`, { 'is-open': open }]"
-    @mouseenter="openTooltip"
-    @mouseleave="closeSoon"
+    @mouseenter="handleMouseEnter"
+    @mouseleave="handleMouseLeave"
     @keydown.esc="closeTooltip"
   >
     <button
@@ -119,8 +119,20 @@ const openTooltip = () => {
   updatePosition()
 }
 
-const handleFocus = () => {
-  if (isMobileViewport()) return
+const isHoverCapable = () => window.matchMedia?.('(hover: hover) and (pointer: fine)').matches
+
+const handleMouseEnter = () => {
+  if (!isHoverCapable()) return
+  openTooltip()
+}
+
+const handleMouseLeave = () => {
+  if (!isHoverCapable()) return
+  closeSoon()
+}
+
+const handleFocus = event => {
+  if (!event.currentTarget.matches(':focus-visible')) return
   openTooltip()
 }
 
@@ -143,12 +155,22 @@ const closeSoon = () => {
   }, 120)
 }
 
+const handleDocumentPointerDown = event => {
+  if (!open.value) return
+
+  const target = event.target
+  if (triggerRef.value?.contains(target) || panelRef.value?.contains(target)) return
+  closeTooltip()
+}
+
 window.addEventListener('resize', updatePosition)
 window.addEventListener('scroll', updatePosition, true)
+document.addEventListener('pointerdown', handleDocumentPointerDown)
 
 onBeforeUnmount(() => {
   clearCloseTimer()
   window.removeEventListener('resize', updatePosition)
   window.removeEventListener('scroll', updatePosition, true)
+  document.removeEventListener('pointerdown', handleDocumentPointerDown)
 })
 </script>
