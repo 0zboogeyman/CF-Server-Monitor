@@ -143,7 +143,7 @@
                 <HelpTooltip :text="trans.wssReportHoursTip" />
               </div>
               <div class="wss-schedule-meta">
-                {{ localTimezoneLabel }} · {{ wssReportHours.length }}/24 {{ trans.hoursSelected }}
+                {{ localTimezoneLabel }} · {{ wssReportHours.length }}/24 {{ trans.hoursSelected }} · {{ trans.agentWssMinVersion }}
               </div>
             </div>
             <div class="wss-schedule-actions">
@@ -213,6 +213,35 @@
             <select v-model="notificationChannel" class="form-select">
               <option value="builtin">{{ trans.builtinNotification || 'Built-in' }}</option>
               <option value="webhook">{{ trans.customWebhook || 'Custom Webhook' }}</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">
+              {{ trans.notificationTimezone || 'Notification Timezone' }}
+              <HelpTooltip :text="trans.notificationTimezoneTip || 'Used only for notification output times and expiration reminder schedule.'" />
+            </label>
+            <input
+              type="text"
+              list="notification-timezone-options"
+              v-model.trim="settings.notification_timezone"
+              class="form-input"
+              placeholder="UTC"
+            >
+            <datalist id="notification-timezone-options">
+              <option v-for="timezone in commonNotificationTimezones" :key="timezone" :value="timezone"></option>
+            </datalist>
+          </div>
+
+          <div class="form-group flex-1">
+            <label class="form-label">
+              {{ trans.expireNotificationTime || 'Expiration Notification Time' }}
+              <HelpTooltip :text="trans.expireNotificationTimeTip || 'Check expiration and send reminders daily at this hour in the notification timezone. Use 0-23.'" />
+            </label>
+            <select v-model="settings.expire_notification_time" class="form-select">
+              <option v-for="hour in expireNotificationHourOptions" :key="hour" :value="hour">{{ hour }}</option>
             </select>
           </div>
         </div>
@@ -640,6 +669,19 @@ defineEmits([
   'save-settings', 'upload-bg', 'upload-favicon',
   'send-test-notification', 'query-d1-usage'
 ])
+
+const commonNotificationTimezones = [
+  'UTC',
+  'Asia/Shanghai',
+  'Asia/Hong_Kong',
+  'Asia/Tokyo',
+  'Asia/Singapore',
+  'Europe/London',
+  'Europe/Berlin',
+  'America/New_York',
+  'America/Los_Angeles'
+]
+const expireNotificationHourOptions = Array.from({ length: 24 }, (_, hour) => String(hour))
 
 const cspErrors = reactive({
   csp_static: '',

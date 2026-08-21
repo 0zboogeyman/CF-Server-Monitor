@@ -28,6 +28,7 @@ const expectedLegacy = 'collect_interval=1&report_interval=60&reset_day=15&schem
 const config = buildAgentConfig(server);
 assert.equal(serializeAgentConfig(config), expected);
 assert.equal(serializeAgentConfig(buildAgentConfig(server, { wss_report_enabled: 'true' })), expectedWssEnabled);
+assert.equal(serializeAgentConfig(buildAgentConfig(server, { wss_report_enabled: 'true', wss_report_hours: [] })), expectedWssEnabled);
 assert.equal(serializeAgentConfig(buildAgentConfig(server, null, AGENT_CONFIG_LEGACY_SCHEMA_VERSION)), expectedLegacy);
 
 const descriptor = await describeAgentConfig(server);

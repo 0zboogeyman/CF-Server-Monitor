@@ -650,6 +650,30 @@ const normalizeExpireReminderSetting = (value) => {
 
 const isExpireReminderEnabled = (value) => normalizeExpireReminderSetting(value) !== '0'
 
+const isValidNotificationTimezone = (value) => {
+  const timezone = String(value || '').trim()
+  if (!timezone || timezone.length > 64) return false
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(new Date(0))
+    return true
+  } catch (_) {
+    return false
+  }
+}
+
+const normalizeNotificationTimezoneSetting = (value) => {
+  const timezone = String(value || '').trim()
+  return isValidNotificationTimezone(timezone) ? timezone : 'UTC'
+}
+
+const normalizeExpireNotificationTimeSetting = (value) => {
+  const raw = String(value ?? '').trim()
+  if (!raw) return '12'
+  const legacyTimeMatch = raw.match(/^([01]?\d|2[0-3]):[0-5]\d$/)
+  const hour = Number(legacyTimeMatch ? legacyTimeMatch[1] : raw)
+  return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? String(hour) : '12'
+}
+
 const normalizeLongHistoryPointsSetting = (value) => {
   const points = Number(value)
   return String(
@@ -878,6 +902,8 @@ const settings = ref({
   resource_alert_rules: [],
   tg_bot_token: '',
   tg_chat_id: '',
+  notification_timezone: 'UTC',
+  expire_notification_time: '12',
   notification_webhook_enabled: false,
   notification_webhook_url: '',
   notification_webhook_method: 'POST',
@@ -1293,6 +1319,8 @@ const loadSettings = async () => {
         resource_alert_rules: normalizeResourceAlertRulesSetting(settingsData.resource_alert_rules),
         tg_bot_token: settingsData.tg_bot_token || '',
         tg_chat_id: settingsData.tg_chat_id || '',
+        notification_timezone: normalizeNotificationTimezoneSetting(settingsData.notification_timezone),
+        expire_notification_time: normalizeExpireNotificationTimeSetting(settingsData.expire_notification_time),
         notification_webhook_enabled: settingsData.notification_webhook_enabled === 'true' || settingsData.notification_webhook_enabled === true,
         notification_webhook_url: settingsData.notification_webhook_url || '',
         notification_webhook_method: String(settingsData.notification_webhook_method || 'POST').toUpperCase() === 'GET' ? 'GET' : 'POST',
@@ -1365,6 +1393,16 @@ const saveSettings = async () => {
   const frontendWsTimeoutMinutes = Number(settings.value.frontend_ws_timeout_minutes)
   if (!Number.isInteger(frontendWsTimeoutMinutes) || frontendWsTimeoutMinutes < 0 || frontendWsTimeoutMinutes > FRONTEND_WS_TIMEOUT_MINUTES_MAX) {
     validationError.value = trans.value.invalidFrontendWsTimeoutMinutes
+    return
+  }
+
+  if (!isValidNotificationTimezone(settings.value.notification_timezone)) {
+    validationError.value = trans.value.invalidNotificationTimezone || 'Notification timezone must be a valid IANA timezone, for example Asia/Shanghai'
+    return
+  }
+
+  if (normalizeExpireNotificationTimeSetting(settings.value.expire_notification_time) !== String(settings.value.expire_notification_time)) {
+    validationError.value = trans.value.invalidExpireNotificationTime || 'Expiration notification time must be an integer from 0 to 23'
     return
   }
 
@@ -1452,6 +1490,8 @@ const saveSettings = async () => {
       resource_alert_rules: normalizeResourceAlertRulesSetting(settings.value.resource_alert_rules),
       tg_bot_token: settings.value.tg_bot_token,
       tg_chat_id: settings.value.tg_chat_id,
+      notification_timezone: normalizeNotificationTimezoneSetting(settings.value.notification_timezone),
+      expire_notification_time: normalizeExpireNotificationTimeSetting(settings.value.expire_notification_time),
       notification_webhook_enabled: settings.value.notification_webhook_enabled ? 'true' : 'false',
       notification_webhook_url: settings.value.notification_webhook_url,
       notification_webhook_method: settings.value.notification_webhook_method === 'GET' ? 'GET' : 'POST',
@@ -2199,7 +2239,9 @@ const sendTestNotification = async () => {
       notification_webhook_format: settings.value.notification_webhook_format,
       notification_webhook_headers: settings.value.notification_webhook_headers,
       notification_webhook_body: settings.value.notification_webhook_body,
-      notification_template: settings.value.notification_template
+      notification_template: settings.value.notification_template,
+      notification_timezone: normalizeNotificationTimezoneSetting(settings.value.notification_timezone),
+      expire_notification_time: normalizeExpireNotificationTimeSetting(settings.value.expire_notification_time)
     })
     if (!result.error) {
       alertMessage.value = getMessage(result.data.message) || trans.value.testNotificationSent

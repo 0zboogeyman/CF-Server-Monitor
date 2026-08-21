@@ -196,8 +196,37 @@ test('Agent WSS upgrade follows the configured UTC hour schedule', async () => {
     })
   );
 
-  assert.equal(disabledResponse.status, 403);
+  assert.equal(disabledResponse.status, 409);
+  assert.equal(disabledResponse.headers.get('X-Agent-Wss-Mode'), 'inactive');
+  assert.equal(disabledResponse.headers.get('X-Agent-Wss-Reason'), 'wss_schedule_inactive');
+  const disabledBody = await disabledResponse.json();
+  assert.equal(disabledBody.text, 'wss_schedule_inactive');
+  assert.equal(disabledBody.connection_mode, 'http');
   assert.equal(forwarded, false);
+});
+
+test('Durable Object rechecks Agent WSS schedule before accepting a socket', async () => {
+  clearSiteSettingsCache();
+  const currentHour = new Date().getUTCHours();
+  const broadcaster = makeBroadcaster([], {
+    DB: makeSettingsDb({
+      wss_report_enabled: 'true',
+      wss_report_hours: [(currentHour + 1) % 24]
+    })
+  });
+
+  const response = await broadcaster._handleAgentReportWebSocket(
+    makeWebSocketUpgradeRequest('http://internal/update'),
+    new URL('http://internal/update')
+  );
+
+  assert.equal(response.status, 409);
+  assert.equal(response.headers.get('X-Agent-Wss-Mode'), 'inactive');
+  assert.equal(response.headers.get('X-Agent-Wss-Reason'), 'wss_schedule_inactive');
+  const body = await response.json();
+  assert.equal(body.text, 'wss_schedule_inactive');
+  assert.equal(body.connection_mode, 'http');
+  assert.equal(broadcaster.standardAgentWebSocketCount, 0);
 });
 
 test('WSS agent config state only requests ack for fields in current report', () => {
@@ -580,10 +609,12 @@ test('Agent WSS closes on the first report after entering a disabled UTC hour', 
 
   assert.equal(sent.length, 1);
   assert.equal(sent[0].type, 'error');
-  assert.equal(sent[0].code, 403);
+  assert.equal(sent[0].code, 409);
+  assert.equal(sent[0].text, 'wss_schedule_inactive');
+  assert.equal(sent[0].connection_mode, 'http');
   assert.deepEqual(closed, [{
-    code: 1008,
-    reason: 'Agent WSS report disabled for current hour'
+    code: 1013,
+    reason: 'wss_schedule_inactive'
   }]);
 });
 
