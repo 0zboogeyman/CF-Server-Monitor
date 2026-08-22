@@ -592,7 +592,7 @@ const translations = reactive({
     group: '分组',
     tags: '标签',
     note: '备注',
-    tagsPlaceholder: '英文逗号割开',
+    tagsPlaceholder: '英文逗号隔开',
     notePlaceholder: '内部备注，仅在管理端显示',
     addServer: '添加服务器',
     batchDelete: '批量删除',
