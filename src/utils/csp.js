@@ -94,8 +94,23 @@ export function injectApiBase(html, apiBases) {
   );
 }
 
-export function buildBackgroundStyle(url) {
-  if (!url) return '';
-  const safe = String(url).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
-  return `<style>body{background-image:url('${safe}') !important;background-size:cover !important;background-attachment:fixed !important;background-position:center !important;}</style>`;
+function escapeCssUrl(value) {
+  return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+}
+
+export function buildBackgroundStyle(url, mobileUrl = '') {
+  const desktop = String(url || '').trim();
+  const mobile = String(mobileUrl || '').trim();
+  if (!desktop && !mobile) return '';
+
+  const rules = [];
+  if (desktop) {
+    const safe = escapeCssUrl(desktop);
+    rules.push(`body{background-image:url('${safe}') !important;background-size:cover !important;background-attachment:fixed !important;background-position:center !important;}`);
+  }
+  if (mobile) {
+    const safeMobile = escapeCssUrl(mobile);
+    rules.push(`@media (max-width: 767px){body{background-image:url('${safeMobile}') !important;background-size:cover !important;background-attachment:fixed !important;background-position:center !important;}}`);
+  }
+  return `<style>${rules.join('')}</style>`;
 }
