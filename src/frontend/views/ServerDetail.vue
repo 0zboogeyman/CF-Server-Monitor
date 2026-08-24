@@ -349,7 +349,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick, h } from 'vue'
+import { ref, computed, inject, onMounted, onUnmounted, watch, nextTick, h } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import TerminalHeader from '../components/TerminalHeader.vue'
 import Footer from '../components/Footer.vue'
@@ -370,6 +370,7 @@ import { applyMikusThemeOptions } from '../utils/themeOptions.js'
 
 const route = useRoute()
 const router = useRouter()
+const appConfig = inject('appConfig', null)
 
 let serverId = route.params.id
 if (!serverId) {
@@ -1679,9 +1680,17 @@ const handleLiveMessage = (msg) => {
   }
 }
 
+const getInjectedRuntimeConfig = () => {
+  if (!appConfig) return null
+  if (Array.isArray(appConfig.site_configs) && appConfig.site_configs[apiIndex.value]) {
+    return appConfig.site_configs[apiIndex.value]
+  }
+  return apiIndex.value === 0 ? appConfig : null
+}
+
 const loadThemeOptionsFromConfig = async () => {
   try {
-    const runtimeConfig = await fetchConfig(apiIndex.value)
+    const runtimeConfig = getInjectedRuntimeConfig() || await fetchConfig(apiIndex.value)
     frontendWsTimeoutMinutes.value = normalizeLiveSocketTimeoutMinutes(runtimeConfig?.frontend_ws_timeout_minutes)
     if (runtimeConfig && Object.prototype.hasOwnProperty.call(runtimeConfig, 'theme_options')) {
       applyMikusThemeOptions(runtimeConfig.theme_options)
