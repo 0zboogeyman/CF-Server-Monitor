@@ -232,6 +232,7 @@ When moving from an old root installation to a non-root installation, uninstall 
 | Variable | Required | Description |
 | --- | --- | --- |
 | `API_SECRET` | Yes | Agent reporting secret and initial admin password |
+| `API_BASE` | No | Worker API base URLs for frontend requests, comma-separated; useful for multi-Worker aggregation or separated frontend/backend deployments |
 | `CORS_ALLOWED_ORIGINS` | No | Allowed API origins, comma-separated |
 
 ### GitHub Pages Static Frontend

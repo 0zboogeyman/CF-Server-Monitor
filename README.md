@@ -230,6 +230,7 @@ loginctl enable-linger 用户名
 | 变量                     | 必填 | 说明                       |
 | ---------------------- | -- | ------------------------ |
 | `API_SECRET`           | 是  | Agent 上报密钥；也是首次登录后台的默认密码 |
+| `API_BASE`             | 否  | 前端请求的 Worker API 地址，多个用英文逗号分隔；用于多 Worker 聚合或前后端分离 |
 | `CORS_ALLOWED_ORIGINS` | 否  | 允许跨域访问 API 的来源，多个用英文逗号分隔 |
 
 ### GitHub Pages 静态前台
