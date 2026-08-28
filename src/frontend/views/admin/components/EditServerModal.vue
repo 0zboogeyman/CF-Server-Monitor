@@ -140,10 +140,13 @@
 
       <div class="form-row mobile-two-row">
         <div class="form-group flex-1">
-          <label class="form-label">{{ trans.pingMode }}</label>
+          <label class="form-label">
+            {{ trans.pingMode }}
+            <HelpTooltip :text="trans.pingModeIcmpRootHint" />
+          </label>
           <select v-model="editForm.ping_mode" class="form-select">
-            <option value="tcp">{{ trans.pingModeTcp }}</option>
-            <option value="icmp">{{ trans.pingModeIcmp }}</option>
+            <option value="tcp">TCP</option>
+            <option value="icmp">ICMP (root)</option>
           </select>
         </div>
         <div class="form-group flex-1">

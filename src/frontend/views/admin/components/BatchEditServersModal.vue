@@ -105,8 +105,8 @@
           </BatchEditField>
           <BatchEditField :enabled="enabled.ping_mode" :label="trans.pingMode" @toggle="toggleField('ping_mode', $event)">
             <select v-model="form.ping_mode" class="form-select" :disabled="!enabled.ping_mode">
-              <option value="tcp">{{ trans.pingModeTcp }}</option>
-              <option value="icmp">{{ trans.pingModeIcmp }}</option>
+              <option value="tcp">TCP</option>
+              <option value="icmp">ICMP (root)</option>
             </select>
           </BatchEditField>
           <BatchEditField :enabled="enabled.interface" :label="trans.networkInterface" @toggle="toggleField('interface', $event)">

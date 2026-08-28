@@ -54,7 +54,7 @@
         </div>
         <div class="config-row">
           <span class="config-label">{{ trans.pingMode }}</span>
-          <span class="config-value">{{ pingMode === 'icmp' ? trans.pingModeIcmp : trans.pingModeTcp }}</span>
+          <span class="config-value">{{ effectivePingMode === 'icmp' ? 'ICMP (root)' : 'TCP' }}</span>
         </div>
         <div class="config-row">
           <span class="config-label">{{ trans.trafficResetDay }}</span>
@@ -186,6 +186,7 @@ const selectedGhProxy = computed({
 })
 
 const showCustomGhProxy = computed(() => selectedGhProxy.value === CUSTOM_GH_PROXY_VALUE)
+const effectivePingMode = computed(() => props.pingMode === 'icmp' ? 'icmp' : 'tcp')
 
 watch(
   () => props.show,
