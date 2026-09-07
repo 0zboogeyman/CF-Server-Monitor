@@ -1766,11 +1766,11 @@ const getCustomInstallCommand = () => {
     `-reset_day=${resetDay.value ?? 1}`,
     `-auto_update=${autoUpdateFlag}`
   )
-  if (customCt.value) params.push(`-ct=${customCt.value}`)
-  if (customCu.value) params.push(`-cu=${customCu.value}`)
-  if (customCm.value) params.push(`-cm=${customCm.value}`)
-  if (customBd.value) params.push(`-bd=${customBd.value}`)
-  if (node1.value) params.push(`-node_1=${node1.value}`); if (node2.value) params.push(`-node_2=${node2.value}`); if (node3.value) params.push(`-node_3=${node3.value}`); if (node4.value) params.push(`-node_4=${node4.value}`)
+  if (customCt.value) params.push(`-ct='${customCt.value}'`)
+  if (customCu.value) params.push(`-cu='${customCu.value}'`)
+  if (customCm.value) params.push(`-cm='${customCm.value}'`)
+  if (customBd.value) params.push(`-bd='${customBd.value}'`)
+  if (node1.value) params.push(`-node_1='${node1.value}'`); if (node2.value) params.push(`-node_2='${node2.value}'`); if (node3.value) params.push(`-node_3='${node3.value}'`); if (node4.value) params.push(`-node_4='${node4.value}'`)
   if (networkInterface.value) params.push(`-interface=${networkInterface.value}`)
   if (hasCorrectionValue(rxCorrection.value)) params.push(`-rx_correction=${rxCorrection.value}`)
   if (hasCorrectionValue(txCorrection.value)) params.push(`-tx_correction=${txCorrection.value}`)

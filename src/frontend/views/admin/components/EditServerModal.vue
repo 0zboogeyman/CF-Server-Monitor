@@ -195,14 +195,14 @@
       <div class="form-row">
         <div v-for="(field, index) in ['node_1', 'node_2']" :key="field" class="form-group flex-1">
           <label class="form-label">{{ settings[`${field}_name`] || `Node ${index + 1}` }} <span class="text-xs text-muted">({{ trans.serverLevel }})</span></label>
-          <input type="text" :name="`edit_${field}`" autocomplete="off" v-model.trim="editForm[field]" :class="['form-input', { 'input-invalid': pingNodeErrors[field] }]" placeholder="host[:port]">
+          <input type="text" :name="`edit_${field}`" autocomplete="off" v-model.trim="editForm[field]" :class="['form-input', { 'input-invalid': pingNodeErrors[field] }]" placeholder="host[:port] / [IPv6]:port">
           <p v-if="pingNodeErrors[field]" class="text-red text-sm mt-1">{{ pingNodeErrors[field] }}</p>
         </div>
       </div>
       <div class="form-row">
         <div v-for="(field, index) in ['node_3', 'node_4']" :key="field" class="form-group flex-1">
           <label class="form-label">{{ settings[`${field}_name`] || `Node ${index + 3}` }} <span class="text-xs text-muted">({{ trans.serverLevel }})</span></label>
-          <input type="text" :name="`edit_${field}`" autocomplete="off" v-model.trim="editForm[field]" :class="['form-input', { 'input-invalid': pingNodeErrors[field] }]" placeholder="host[:port]">
+          <input type="text" :name="`edit_${field}`" autocomplete="off" v-model.trim="editForm[field]" :class="['form-input', { 'input-invalid': pingNodeErrors[field] }]" placeholder="host[:port] / [IPv6]:port">
           <p v-if="pingNodeErrors[field]" class="text-red text-sm mt-1">{{ pingNodeErrors[field] }}</p>
         </div>
       </div>

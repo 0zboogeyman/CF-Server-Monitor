@@ -22,8 +22,8 @@ const server = {
   reset_day: 15,
   ping_mode: 'tcp'
 };
-const expected = 'collect_interval=1&report_interval=60&reset_day=15&schema_version=6&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=&connection_mode=http&ping_mode=tcp';
-const expectedWssEnabled = 'collect_interval=1&report_interval=60&reset_day=15&schema_version=6&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=&connection_mode=auto&wss_report_interval=2&ping_mode=tcp';
+const expected = 'collect_interval=1&report_interval=60&reset_day=15&schema_version=7&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=&node_1=&node_2=&node_3=&node_4=&connection_mode=http&ping_mode=tcp';
+const expectedWssEnabled = 'collect_interval=1&report_interval=60&reset_day=15&schema_version=7&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=&node_1=&node_2=&node_3=&node_4=&connection_mode=auto&wss_report_interval=2&ping_mode=tcp';
 const expectedLegacy = 'collect_interval=1&report_interval=60&reset_day=15&schema_version=3&custom_ct=&custom_cu=&custom_cm=&custom_bd=&interface=';
 
 const config = buildAgentConfig(server);
@@ -207,9 +207,12 @@ assert.equal(buildAgentConfig({ custom_ct: 'GD-CT-V4.IP.ZSTATICCDN.COM:080' }).c
 assert.equal(buildAgentConfig({ custom_ct: 'a'.repeat(100) }).custom_ct, '');
 assert.equal(buildAgentConfig({ custom_ct: 'gd-ct-v4.ip.zstaticcdn.com:99999' }).custom_ct, '');
 assert.equal(buildAgentConfig({ custom_ct: 'foo:bar' }).custom_ct, '');
-assert.equal(buildAgentConfig({ custom_ct: '2001:db8::1' }).custom_ct, '');
+assert.equal(buildAgentConfig({ custom_ct: '2001:db8::1' }).custom_ct, '[2001:db8::1]');
+assert.equal(buildAgentConfig({ custom_ct: '[2001:db8::1]:443' }).custom_ct, '[2001:db8::1]:443');
 assert.deepEqual(validatePingNode('foo:443'), { valid: true, value: 'foo:443' });
 assert.equal(validatePingNode('foo:bar').valid, false);
-assert.equal(validatePingNode('2001:db8::1').valid, false);
+assert.deepEqual(validatePingNode('2001:db8::1'), { valid: true, value: '[2001:db8::1]' });
+assert.deepEqual(validatePingNode('[2001:db8::1]:443'), { valid: true, value: '[2001:db8::1]:443' });
+assert.equal(validatePingNode('2001:db8::1:443').valid, false);
 
 console.log('agent config tests passed');

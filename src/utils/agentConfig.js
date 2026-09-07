@@ -24,6 +24,7 @@ const ALLOWED_PING_MODES = new Set([PING_MODE_TCP, PING_MODE_ICMP]);
 const PING_NODE_HOST_PATTERN = /^[a-zA-Z0-9._-]+$/;
 const IPV4_PATTERN = /^(?:\d{1,3}\.){3}\d{1,3}$/;
 const IPV4_LIKE_PATTERN = /^(?:\d+\.){3}\d+$/;
+const IPV6_PATTERN = /^(?:(?:[0-9a-f]{1,4}:){1,7}[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,7}:|(?:[0-9a-f]{1,4}:){1,6}:[0-9a-f]{1,4}|(?:[0-9a-f]{1,4}:){1,5}(?::[0-9a-f]{1,4}){1,2}|(?:[0-9a-f]{1,4}:){1,4}(?::[0-9a-f]{1,4}){1,3}|(?:[0-9a-f]{1,4}:){1,3}(?::[0-9a-f]{1,4}){1,4}|(?:[0-9a-f]{1,4}:){1,2}(?::[0-9a-f]{1,4}){1,5}|[0-9a-f]{1,4}:(?:(?::[0-9a-f]{1,4}){1,6})|:(?:(?::[0-9a-f]{1,4}){1,7}|:))$/i;
 const NETWORK_INTERFACE_PATTERN = /^[A-Za-z0-9_.:-]+$/;
 
 function normalizeSchemaVersion(value) {
@@ -143,16 +144,28 @@ function isValidHostname(host) {
     return /^[a-zA-Z0-9_](?:[a-zA-Z0-9_-]*[a-zA-Z0-9_])?$/.test(label);
   });
 }
+const isValidIpv6 = (host) => IPV6_PATTERN.test(host);
 
 export function validatePingNode(value) {
   const raw = String(value || '').trim();
   if (!raw) return { valid: true, value: '' };
-  if (raw.length > 60 || raw.includes('://') || /[\s/@?#\\[\]]/.test(raw)) {
+  if (raw.length > 60 || raw.includes('://') || /[\s/@?#\\]/.test(raw)) {
     return { valid: false };
   }
 
+  if (raw.startsWith('[')) {
+    const match = raw.match(/^\[([^\]]+)\](?::(\d{1,5}))?$/);
+    if (!match || !isValidIpv6(match[1])) return { valid: false };
+    const port = match[2] ? Number(match[2]) : null;
+    if (port !== null && (port < 1 || port > 65535)) return { valid: false };
+    return { valid: true, value: `[${match[1].toLowerCase()}]${port !== null ? `:${port}` : ''}` };
+  }
+
   const colonCount = (raw.match(/:/g) || []).length;
-  if (colonCount > 1) return { valid: false };
+  if (colonCount > 1) {
+    const host = raw.toLowerCase();
+    return isValidIpv6(host) ? { valid: true, value: `[${host}]` } : { valid: false };
+  }
 
   let host = raw;
   let port = '';
