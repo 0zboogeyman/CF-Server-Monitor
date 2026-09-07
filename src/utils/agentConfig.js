@@ -277,14 +277,21 @@ export function buildAgentConfig(server, settings = null, schemaVersion = AGENT_
     ? resetNumber
     : 1;
 
-  const customCt = sanitizePingNode(server?.custom_ct || settings?.custom_ct || '');
-  const customCu = sanitizePingNode(server?.custom_cu || settings?.custom_cu || '');
-  const customCm = sanitizePingNode(server?.custom_cm || settings?.custom_cm || '');
-  const customBd = sanitizePingNode(server?.custom_bd || settings?.custom_bd || '');
-  const node1 = sanitizePingNode(server?.node_1 || settings?.node_1 || '');
-  const node2 = sanitizePingNode(server?.node_2 || settings?.node_2 || '');
-  const node3 = sanitizePingNode(server?.node_3 || settings?.node_3 || '');
-  const node4 = sanitizePingNode(server?.node_4 || settings?.node_4 || '');
+  const resolveNode = (field) => {
+    const serverValue = server?.[field];
+    const hasServerValue = server && Object.prototype.hasOwnProperty.call(server, field) &&
+      serverValue !== undefined && serverValue !== '';
+    const value = hasServerValue ? server[field] : settings?.[field] || '';
+    return sanitizePingNode(value === 0 || value === '0' ? '' : value);
+  };
+  const customCt = resolveNode('custom_ct');
+  const customCu = resolveNode('custom_cu');
+  const customCm = resolveNode('custom_cm');
+  const customBd = resolveNode('custom_bd');
+  const node1 = resolveNode('node_1');
+  const node2 = resolveNode('node_2');
+  const node3 = resolveNode('node_3');
+  const node4 = resolveNode('node_4');
   const networkInterface = sanitizeNetworkInterfaces(server?.interface || '');
 
   const config = {

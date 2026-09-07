@@ -201,6 +201,14 @@ assert.equal(resolvedConfig.custom_ct, 'ct-server.example.com');
 assert.equal(resolvedConfig.custom_cu, 'cu-global.example.com');
 assert.equal(resolvedConfig.custom_cm, 'cm-global.example.com');
 assert.equal(resolvedConfig.custom_bd, 'bd-global.example.com');
+for (const explicitEmpty of [null, 0, '0']) {
+  const explicitEmptyConfig = buildAgentConfig({ custom_ct: explicitEmpty }, settings);
+  assert.equal(explicitEmptyConfig.custom_ct, '', `custom_ct=${String(explicitEmpty)} must override the global node`);
+  const explicitEmptyDescriptor = await describeAgentConfig({ custom_ct: explicitEmpty }, settings);
+  assert.match(explicitEmptyDescriptor.serialized, /(?:^|&)custom_ct=(?:&|$)/);
+}
+assert.equal(buildAgentConfig({ custom_ct: '' }, settings).custom_ct, 'ct-global.example.com');
+assert.equal(buildAgentConfig({}, settings).custom_ct, 'ct-global.example.com');
 assert.equal(buildAgentConfig({ interface: 'eth0, ens3,eth0' }).interface, 'eth0,ens3');
 assert.equal(buildAgentConfig({ custom_ct: 'gd-ct-v4.ip.zstaticcdn.com:80' }).custom_ct, 'gd-ct-v4.ip.zstaticcdn.com:80');
 assert.equal(buildAgentConfig({ custom_ct: 'GD-CT-V4.IP.ZSTATICCDN.COM:080' }).custom_ct, 'gd-ct-v4.ip.zstaticcdn.com:80');
