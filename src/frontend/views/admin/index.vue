@@ -1803,6 +1803,10 @@ const getCustomInstallCommand = () => {
 }
 
 const copyCustomCmd = async () => {
+  if (window.location.protocol !== 'https:') {
+    alertMessage.value = trans.value.httpsRequired
+    return 
+  }
   const cmd = getCustomInstallCommand()
   try {
     await navigator.clipboard.writeText(cmd)
