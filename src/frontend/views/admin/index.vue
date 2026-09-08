@@ -1659,7 +1659,7 @@ const getInstallCommand = (serverId) => {
 
 const resolveServerPingNode = (server, field) => {
   const value = server?.[field]
-  const explicitEmpty = value === null || value === 0 || value === '0'
+  const explicitEmpty = value === 0 || value === '0'
   return {
     value: explicitEmpty ? '' : (value || settings.value[field] || ''),
     explicitEmpty
