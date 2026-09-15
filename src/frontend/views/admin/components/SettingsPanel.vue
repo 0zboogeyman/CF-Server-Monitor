@@ -313,6 +313,12 @@
             </select>
           </div>
         </div>
+        <div
+          v-if="settings.traffic_report_daily || settings.traffic_report_weekly || settings.traffic_report_monthly"
+          class="admin-warning-text"
+        >
+          ⚠️ {{ trans.trafficReportRestartWarning || 'Traffic uses network-interface counters. A server or Agent restart may reset them and make the current report period inaccurate.' }}
+        </div>
 
         <div v-if="notificationChannel === 'builtin'" class="form-row">
           <div class="form-group flex-1">

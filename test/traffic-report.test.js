@@ -81,3 +81,19 @@ test('traffic report content formats per-server usage and totals', () => {
   assert.match(report.msg, /↑ 7\.81 KB/);
   assert.match(report.msg, /总计/);
 });
+
+test('traffic report content explains missing previous-period baselines', () => {
+  const labels = [
+    ['每日', '暂无上一日数据'],
+    ['每周', '暂无上周数据'],
+    ['每月', '暂无上月数据']
+  ];
+  for (const [label, expected] of labels) {
+    const report = buildTrafficReportContent([server], [{
+      server_id: server.id,
+      missing: true
+    }], label);
+    assert.match(report.msg, new RegExp(expected));
+    assert.doesNotMatch(report.msg, /总计/);
+  }
+});

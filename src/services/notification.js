@@ -1194,20 +1194,33 @@ export function buildTrafficReportContent(servers, rows, label) {
   const clients = [];
   let totalRx = 0;
   let totalTx = 0;
+  let measuredCount = 0;
+  const missingLabels = {
+    '每日': '暂无上一日数据',
+    '每周': '暂无上周数据',
+    '每月': '暂无上月数据'
+  };
 
   for (const server of servers) {
     const usage = usageByServer.get(server.id);
     if (!usage) continue;
+    clients.push(server.name);
+    if (usage.missing) {
+      lines.push(`${server.name}  ${missingLabels[label] || '暂无上一周期数据'}`);
+      continue;
+    }
     const rx = Math.max(0, Number(usage.rx_bytes) || 0);
     const tx = Math.max(0, Number(usage.tx_bytes) || 0);
     totalRx += rx;
     totalTx += tx;
-    clients.push(server.name);
+    measuredCount += 1;
     lines.push(`${server.name}  ↓ ${formatTrafficBytes(rx)}  ↑ ${formatTrafficBytes(tx)}  合计 ${formatTrafficBytes(rx + tx)}`);
   }
 
   if (lines.length === 0) return null;
-  lines.push(`总计  ↓ ${formatTrafficBytes(totalRx)}  ↑ ${formatTrafficBytes(totalTx)}  合计 ${formatTrafficBytes(totalRx + totalTx)}`);
+  if (measuredCount > 0) {
+    lines.push(`总计  ↓ ${formatTrafficBytes(totalRx)}  ↑ ${formatTrafficBytes(totalTx)}  合计 ${formatTrafficBytes(totalRx + totalTx)}`);
+  }
   return {
     msg: lines.join('\n'),
     context: {
@@ -1243,13 +1256,15 @@ export async function checkTrafficReports(db, options = {}) {
     if (!metrics) continue;
     const result = updateTrafficSnapshots(
       server.traffic_snapshots,
-      metrics.net_rx_monthly,
-      metrics.net_tx_monthly,
+      metrics.net_rx,
+      metrics.net_tx,
       now,
       reportTypes
     );
     for (const type of reportTypes) {
-      if (result.usage[type]) usageRows[type].push({ server_id: server.id, ...result.usage[type] });
+      usageRows[type].push(result.usage[type]
+        ? { server_id: server.id, ...result.usage[type] }
+        : { server_id: server.id, missing: true });
     }
     if (result.changed) {
       await db.prepare('UPDATE servers SET traffic_snapshots = ? WHERE id = ?')
