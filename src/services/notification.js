@@ -1169,7 +1169,7 @@ async function buildTrafficReport(db, servers, startDate, endDate, label) {
 }
 
 export async function checkTrafficReports(db, options = {}) {
-  const settings = await loadSiteSettings(db);
+  const settings = options.settings || await loadSiteSettings(db);
   const dailyEnabled = isTrafficReportEnabled(settings, 'traffic_report_daily');
   const weeklyEnabled = isTrafficReportEnabled(settings, 'traffic_report_weekly');
   const monthlyEnabled = isTrafficReportEnabled(settings, 'traffic_report_monthly');
@@ -1181,8 +1181,8 @@ export async function checkTrafficReports(db, options = {}) {
   const todaySerial = getZonedDateSerial(now, settings.notification_timezone);
   if (!Number.isFinite(todaySerial)) return false;
   const reportDate = formatDateSerial(todaySerial - 1);
-  const servers = await getAllServers(db);
-  const latestMetrics = await getLatestMetricsForAllServers(db);
+  const servers = options.servers || await getAllServers(db);
+  const latestMetrics = options.latestMetrics || await getLatestMetricsForAllServers(db);
   let inserted = false;
   let hasMeasuredUsage = false;
 
@@ -1224,7 +1224,8 @@ export async function checkTrafficReports(db, options = {}) {
   }
 
   for (const report of reports.filter(Boolean)) {
-    const error = await sendNotification(settings, report.msg, report.context);
+    const notify = options.sendNotification || sendNotification;
+    const error = await notify(settings, report.msg, report.context);
     if (error) console.warn('[TrafficReport] notification failed:', error);
   }
 
