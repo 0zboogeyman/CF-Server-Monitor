@@ -1,79 +1,71 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { Miniflare } from 'miniflare';
 
 import {
   buildTrafficReportContent,
   calculateTrafficDelta,
-  ensureTrafficDailyTable,
-  getTrafficReportPeriods,
-  recordDailyTraffic
+  getDueTrafficReportTypes,
+  getTrafficPeriodKeys,
+  normalizeTrafficSnapshots,
+  updateTrafficSnapshots
 } from '../src/services/notification.js';
 
+const timezone = 'Asia/Shanghai';
 const server = { id: 'server-1', name: 'Tokyo' };
 
-function createMiniflare(name) {
-  return new Miniflare({
-    modules: true,
-    script: 'export default { fetch() { return new Response("OK"); } }',
-    d1Databases: { DB: name }
-  });
-}
+test('traffic snapshots initialize the three lightweight JSON baselines', () => {
+  const now = Date.UTC(2026, 8, 1, 1);
+  const result = updateTrafficSnapshots('{}', 10_000, 20_000, now, ['daily', 'weekly', 'monthly']);
 
-function metrics(rx, tx) {
-  return new Map([[server.id, { net_rx_monthly: rx, net_tx_monthly: tx }]]);
-}
-
-test('daily traffic storage records a baseline, calculates deltas, and deduplicates the same date', async () => {
-  const miniflare = createMiniflare('traffic-report-daily-test');
-  try {
-    const db = await miniflare.getD1Database('DB');
-    await ensureTrafficDailyTable(db);
-
-    const baseline = await recordDailyTraffic(db, [server], metrics(10_000, 20_000), '2026-08-31');
-    assert.deepEqual(baseline, { inserted: true, hasMeasuredUsage: false });
-
-    const measured = await recordDailyTraffic(db, [server], metrics(15_000, 28_000), '2026-09-01');
-    assert.deepEqual(measured, { inserted: true, hasMeasuredUsage: true });
-    const row = await db.prepare('SELECT * FROM traffic_daily WHERE report_date = ?')
-      .bind('2026-09-01').first();
-    assert.equal(row.rx_bytes, 5_000);
-    assert.equal(row.tx_bytes, 8_000);
-
-    const duplicate = await recordDailyTraffic(db, [server], metrics(17_000, 31_000), '2026-09-01');
-    assert.deepEqual(duplicate, { inserted: false, hasMeasuredUsage: true });
-    const unchanged = await db.prepare('SELECT * FROM traffic_daily WHERE report_date = ?')
-      .bind('2026-09-01').first();
-    assert.equal(unchanged.rx_bytes, 5_000);
-    assert.equal(unchanged.tx_bytes, 8_000);
-  } finally {
-    await miniflare.dispose();
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.usage, {});
+  assert.deepEqual(Object.keys(result.snapshots), ['daily', 'weekly', 'monthly']);
+  for (const snapshot of Object.values(result.snapshots)) {
+    assert.deepEqual(snapshot, {
+      time: Math.floor(now / 1000),
+      rx_bytes: 10_000,
+      tx_bytes: 20_000
+    });
   }
 });
 
-test('traffic delta handles monthly counter resets', () => {
-  assert.equal(calculateTrafficDelta(15_000, 10_000), 5_000);
-  assert.equal(calculateTrafficDelta(2_048, 50_000), 2_048);
-  assert.equal(calculateTrafficDelta(2_048, null), 0);
+test('traffic snapshots calculate usage and roll only crossed period boundaries', () => {
+  const first = updateTrafficSnapshots('{}', 10_000, 20_000, Date.UTC(2026, 8, 6, 1), ['daily', 'weekly', 'monthly']);
+  const monday = updateTrafficSnapshots(first.snapshots, 15_000, 28_000, Date.UTC(2026, 8, 7, 1), ['daily', 'weekly']);
+
+  assert.deepEqual(monday.usage.daily, { rx_bytes: 5_000, tx_bytes: 8_000 });
+  assert.deepEqual(monday.usage.weekly, { rx_bytes: 5_000, tx_bytes: 8_000 });
+  assert.equal(monday.usage.monthly, undefined);
+  assert.equal(monday.snapshots.daily.rx_bytes, 15_000);
+  assert.equal(monday.snapshots.weekly.rx_bytes, 15_000);
+  assert.equal(monday.snapshots.monthly.rx_bytes, 10_000);
 });
 
-test('traffic report periods include Monday weekly and first-day monthly ranges', () => {
-  const mondaySerial = Math.floor(Date.UTC(2026, 8, 7) / 86_400_000);
-  assert.deepEqual(getTrafficReportPeriods(mondaySerial, { day: '07' }, {
+test('traffic snapshot period keys honor the configured notification timezone', () => {
+  const sundayUtc = Date.UTC(2026, 8, 6, 16, 30);
+  assert.deepEqual(getTrafficPeriodKeys(sundayUtc, timezone), {
+    daily: '2026-09-07',
+    weekly: '2026-09-07',
+    monthly: '2026-09'
+  });
+
+  assert.deepEqual(getDueTrafficReportTypes(sundayUtc, timezone, {
     daily: true,
     weekly: true,
     monthly: true
-  }), [
-    { startDate: '2026-09-06', endDate: '2026-09-06', label: '每日' },
-    { startDate: '2026-08-31', endDate: '2026-09-06', label: '每周' }
-  ]);
+  }), ['daily', 'weekly']);
 
-  const monthStartSerial = Math.floor(Date.UTC(2026, 9, 1) / 86_400_000);
-  assert.deepEqual(getTrafficReportPeriods(monthStartSerial, { day: '01' }, {
-    monthly: true
-  }), [
-    { startDate: '2026-09-01', endDate: '2026-09-30', label: '每月' }
-  ]);
+  const monthStart = updateTrafficSnapshots('{}', 1_000, 2_000, Date.UTC(2026, 8, 30, 15), ['monthly']);
+  const october = updateTrafficSnapshots(monthStart.snapshots, 3_000, 5_000, Date.UTC(2026, 8, 30, 16), ['monthly']);
+  assert.equal(october.snapshots.monthly.rx_bytes, 3_000);
+  assert.equal(october.snapshots.monthly.tx_bytes, 5_000);
+});
+
+test('traffic snapshot parsing and counter reset handling are backward safe', () => {
+  assert.deepEqual(normalizeTrafficSnapshots('invalid json'), {});
+  assert.equal(calculateTrafficDelta(15_000, 10_000), 5_000);
+  assert.equal(calculateTrafficDelta(2_048, 50_000), 2_048);
+  assert.equal(calculateTrafficDelta(2_048, null), 0);
 });
 
 test('traffic report content formats per-server usage and totals', () => {
@@ -81,7 +73,7 @@ test('traffic report content formats per-server usage and totals', () => {
     server_id: server.id,
     rx_bytes: 5_000,
     tx_bytes: 8_000
-  }], '2026-09-01', '2026-09-01', '每日');
+  }], '每日');
 
   assert.match(report.context.event, /每日流量报告/);
   assert.match(report.msg, /Tokyo/);

@@ -306,7 +306,7 @@
           <div class="form-group flex-1">
             <label class="form-label">
               {{ trans.trafficReportTime || 'Traffic report time' }}
-              <HelpTooltip :text="trans.trafficReportTip || 'Daily report; weekly report on Monday; monthly report on the first day, using the notification timezone.'" />
+              <HelpTooltip :text="trans.trafficReportTip || 'Daily reports run every day, weekly reports on Monday, and monthly reports on the first day in the notification timezone.'" />
             </label>
             <select v-model="settings.traffic_report_time" class="form-select">
               <option v-for="hour in expireNotificationHourOptions" :key="hour" :value="hour">{{ hour }}</option>

@@ -1111,25 +1111,6 @@ export async function checkResourceAlerts(env) {
   }
 }
 
-export async function ensureTrafficDailyTable(db) {
-  await db.prepare(`
-    CREATE TABLE IF NOT EXISTS traffic_daily (
-      report_date TEXT NOT NULL,
-      server_id TEXT NOT NULL,
-      rx_bytes REAL NOT NULL DEFAULT 0,
-      tx_bytes REAL NOT NULL DEFAULT 0,
-      snapshot_rx REAL NOT NULL DEFAULT 0,
-      snapshot_tx REAL NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      PRIMARY KEY (report_date, server_id)
-    )
-  `).run();
-  await db.prepare(`
-    CREATE INDEX IF NOT EXISTS idx_traffic_daily_server_date
-    ON traffic_daily(server_id, report_date DESC)
-  `).run();
-}
-
 export function calculateTrafficDelta(current, previous) {
   const currentValue = Math.max(0, Number(current) || 0);
   if (previous === null || previous === undefined) return 0;
@@ -1137,7 +1118,77 @@ export function calculateTrafficDelta(current, previous) {
   return currentValue >= previousValue ? currentValue - previousValue : currentValue;
 }
 
-export function buildTrafficReportContent(servers, rows, startDate, endDate, label) {
+export function normalizeTrafficSnapshots(value) {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value || '{}') : value;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const result = {};
+    for (const type of ['daily', 'weekly', 'monthly']) {
+      const snapshot = parsed[type];
+      if (!snapshot || typeof snapshot !== 'object') continue;
+      const time = Number(snapshot.time);
+      if (!Number.isFinite(time) || time <= 0) continue;
+      result[type] = {
+        time,
+        rx_bytes: Math.max(0, Number(snapshot.rx_bytes) || 0),
+        tx_bytes: Math.max(0, Number(snapshot.tx_bytes) || 0)
+      };
+    }
+    return result;
+  } catch (_) {
+    return {};
+  }
+}
+
+export function getTrafficPeriodKeys(timestamp, timezone) {
+  const serial = getZonedDateSerial(timestamp, timezone);
+  const parts = getZonedDateParts(timestamp, timezone);
+  if (!Number.isFinite(serial) || !parts) return null;
+  const weekday = ((serial + 4) % 7 + 7) % 7;
+  const mondayOffset = (weekday + 6) % 7;
+  return {
+    daily: formatDateSerial(serial),
+    weekly: formatDateSerial(serial - mondayOffset),
+    monthly: `${parts.year}-${parts.month}`
+  };
+}
+
+export function getDueTrafficReportTypes(timestamp, timezone, enabled = {}) {
+  const keys = getTrafficPeriodKeys(timestamp, timezone);
+  if (!keys) return [];
+  const parts = getZonedDateParts(timestamp, timezone);
+  const serial = getZonedDateSerial(timestamp, timezone);
+  const weekday = ((serial + 4) % 7 + 7) % 7;
+  const types = [];
+  if (enabled.daily) types.push('daily');
+  if (enabled.weekly && weekday === 1) types.push('weekly');
+  if (enabled.monthly && Number(parts.day) === 1) types.push('monthly');
+  return types;
+}
+
+export function updateTrafficSnapshots(value, currentRx, currentTx, timestamp, types) {
+  const snapshots = normalizeTrafficSnapshots(value);
+  const nowSeconds = Math.floor(timestamp / 1000);
+  const rx = Math.max(0, Number(currentRx) || 0);
+  const tx = Math.max(0, Number(currentTx) || 0);
+  const usage = {};
+  let changed = false;
+
+  for (const type of types) {
+    const previous = snapshots[type];
+    if (previous) {
+      usage[type] = {
+        rx_bytes: calculateTrafficDelta(rx, previous.rx_bytes),
+        tx_bytes: calculateTrafficDelta(tx, previous.tx_bytes)
+      };
+    }
+    snapshots[type] = { time: nowSeconds, rx_bytes: rx, tx_bytes: tx };
+    changed = true;
+  }
+  return { snapshots, usage, changed };
+}
+
+export function buildTrafficReportContent(servers, rows, label) {
   const usageByServer = new Map((rows || []).map(row => [row.server_id, row]));
   const lines = [];
   const clients = [];
@@ -1160,7 +1211,7 @@ export function buildTrafficReportContent(servers, rows, startDate, endDate, lab
   return {
     msg: lines.join('\n'),
     context: {
-      event: `${label}流量报告（${startDate}${startDate === endDate ? '' : ` 至 ${endDate}`}）`,
+      event: `${label}流量报告`,
       emoji: '📊',
       clients,
       count: clients.length,
@@ -1169,101 +1220,56 @@ export function buildTrafficReportContent(servers, rows, startDate, endDate, lab
   };
 }
 
-async function buildTrafficReport(db, servers, startDate, endDate, label) {
-  const rows = await db.prepare(`
-    SELECT server_id, SUM(rx_bytes) AS rx_bytes, SUM(tx_bytes) AS tx_bytes
-    FROM traffic_daily
-    WHERE report_date >= ? AND report_date <= ?
-    GROUP BY server_id
-  `).bind(startDate, endDate).all();
-  return buildTrafficReportContent(servers, rows.results || [], startDate, endDate, label);
-}
-
-export function getTrafficReportPeriods(todaySerial, todayParts, enabled = {}) {
-  const reportDate = formatDateSerial(todaySerial - 1);
-  const periods = [];
-  if (enabled.daily) periods.push({ startDate: reportDate, endDate: reportDate, label: '每日' });
-
-  const weekday = ((todaySerial + 4) % 7 + 7) % 7;
-  if (enabled.weekly && weekday === 1) {
-    periods.push({ startDate: formatDateSerial(todaySerial - 7), endDate: reportDate, label: '每周' });
-  }
-
-  if (enabled.monthly && Number(todayParts?.day) === 1) {
-    const previousMonthEnd = todaySerial - 1;
-    const previousMonthDate = new Date(previousMonthEnd * DAY_MS);
-    const previousMonthStart = Math.floor(Date.UTC(previousMonthDate.getUTCFullYear(), previousMonthDate.getUTCMonth(), 1) / DAY_MS);
-    periods.push({ startDate: formatDateSerial(previousMonthStart), endDate: reportDate, label: '每月' });
-  }
-  return periods;
-}
-
-export async function recordDailyTraffic(db, servers, latestMetrics, reportDate, now = Date.now()) {
-  let inserted = false;
-  let hasMeasuredUsage = false;
-  for (const server of servers) {
-    const metrics = latestMetrics.get(server.id);
-    if (!metrics) continue;
-    const currentRx = Math.max(0, Number(metrics.net_rx_monthly) || 0);
-    const currentTx = Math.max(0, Number(metrics.net_tx_monthly) || 0);
-    const previous = await db.prepare(`
-      SELECT snapshot_rx, snapshot_tx FROM traffic_daily
-      WHERE server_id = ? ORDER BY report_date DESC LIMIT 1
-    `).bind(server.id).first();
-    hasMeasuredUsage = hasMeasuredUsage || Boolean(previous);
-    const result = await db.prepare(`
-      INSERT OR IGNORE INTO traffic_daily
-      (report_date, server_id, rx_bytes, tx_bytes, snapshot_rx, snapshot_tx, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).bind(
-      reportDate,
-      server.id,
-      calculateTrafficDelta(currentRx, previous?.snapshot_rx),
-      calculateTrafficDelta(currentTx, previous?.snapshot_tx),
-      currentRx,
-      currentTx,
-      now
-    ).run();
-    inserted = inserted || Number(result.meta?.changes || 0) > 0;
-  }
-  return { inserted, hasMeasuredUsage };
-}
-
 export async function checkTrafficReports(db, options = {}) {
   const settings = await loadSiteSettings(db);
   const dailyEnabled = isTrafficReportEnabled(settings, 'traffic_report_daily');
   const weeklyEnabled = isTrafficReportEnabled(settings, 'traffic_report_weekly');
   const monthlyEnabled = isTrafficReportEnabled(settings, 'traffic_report_monthly');
   const now = Number(options.now || Date.now());
-  if ((!dailyEnabled && !weeklyEnabled && !monthlyEnabled) || !hasNotificationTarget(settings)) return false;
+  if (!dailyEnabled && !weeklyEnabled && !monthlyEnabled) return false;
   if (options.scheduled && !isTrafficReportTimeDue(settings, now)) return false;
-
-  await ensureTrafficDailyTable(db);
-  const todaySerial = getZonedDateSerial(now, settings.notification_timezone);
-  if (!Number.isFinite(todaySerial)) return false;
-  const reportDate = formatDateSerial(todaySerial - 1);
-  const servers = await getAllServers(db);
-  const latestMetrics = await getLatestMetricsForAllServers(db);
-  const { inserted, hasMeasuredUsage } = await recordDailyTraffic(db, servers, latestMetrics, reportDate, now);
-
-  if (!inserted || !hasMeasuredUsage) return false;
-  const todayParts = getZonedDateParts(now, settings.notification_timezone);
-  const periods = getTrafficReportPeriods(todaySerial, todayParts, {
+  const reportTypes = getDueTrafficReportTypes(now, settings.notification_timezone, {
     daily: dailyEnabled,
     weekly: weeklyEnabled,
     monthly: monthlyEnabled
   });
-  const reports = await Promise.all(periods.map(period =>
-    buildTrafficReport(db, servers, period.startDate, period.endDate, period.label)
-  ));
+  if (reportTypes.length === 0) return false;
+  const servers = await getAllServers(db);
+  const latestMetrics = await getLatestMetricsForAllServers(db);
+  const usageRows = { daily: [], weekly: [], monthly: [] };
+
+  for (const server of servers) {
+    const metrics = latestMetrics.get(server.id);
+    if (!metrics) continue;
+    const result = updateTrafficSnapshots(
+      server.traffic_snapshots,
+      metrics.net_rx_monthly,
+      metrics.net_tx_monthly,
+      now,
+      reportTypes
+    );
+    for (const type of reportTypes) {
+      if (result.usage[type]) usageRows[type].push({ server_id: server.id, ...result.usage[type] });
+    }
+    if (result.changed) {
+      await db.prepare('UPDATE servers SET traffic_snapshots = ? WHERE id = ?')
+        .bind(JSON.stringify(result.snapshots), server.id).run();
+      server.traffic_snapshots = JSON.stringify(result.snapshots);
+    }
+  }
+
+  if (!hasNotificationTarget(settings)) return true;
+  const reports = [
+    reportTypes.includes('daily') ? buildTrafficReportContent(servers, usageRows.daily, '每日') : null,
+    reportTypes.includes('weekly') ? buildTrafficReportContent(servers, usageRows.weekly, '每周') : null,
+    reportTypes.includes('monthly') ? buildTrafficReportContent(servers, usageRows.monthly, '每月') : null
+  ];
 
   for (const report of reports.filter(Boolean)) {
     const error = await sendNotification(settings, report.msg, report.context);
     if (error) console.warn('[TrafficReport] notification failed:', error);
   }
 
-  await db.prepare('DELETE FROM traffic_daily WHERE report_date < ?')
-    .bind(formatDateSerial(todaySerial - 400)).run();
   return true;
 }
 
