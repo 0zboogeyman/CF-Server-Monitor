@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   buildTrafficReportContent,
+  buildTrafficReportPayloads,
   calculateTrafficDelta,
   getDueTrafficReportTypes,
   getTrafficPeriodKeys,
@@ -94,7 +95,7 @@ test('traffic report content formats per-server usage and totals', () => {
 
 test('traffic report content explains missing previous-period baselines', () => {
   const labels = [
-    ['每日', '暂无上一日数据'],
+    ['每日', '暂无昨日数据'],
     ['每周', '暂无上周数据'],
     ['每月', '暂无上月数据']
   ];
@@ -106,4 +107,42 @@ test('traffic report content explains missing previous-period baselines', () => 
     assert.match(report.msg, new RegExp(expected));
     assert.doesNotMatch(report.msg, /总计/);
   }
+});
+
+test('traffic report payloads split servers into batches of at most 50', () => {
+  const servers = Array.from({ length: 101 }, (_, index) => ({
+    id: `server-${index + 1}`,
+    name: `Server ${index + 1}`
+  }));
+  const rows = servers.map(item => ({
+    server_id: item.id,
+    rx_bytes: 1_000,
+    tx_bytes: 2_000
+  }));
+
+  const reports = buildTrafficReportPayloads(servers, rows, '每日');
+
+  assert.equal(reports.length, 3);
+  assert.equal(reports[0].context.count, 50);
+  assert.equal(reports[1].context.count, 50);
+  assert.equal(reports[2].context.count, 1);
+  assert.equal(reports[0].context.event, '每日流量报告（1/3）');
+  assert.equal(reports[2].context.event, '每日流量报告（3/3）');
+});
+
+test('traffic report payloads also split before the message soft limit', () => {
+  const servers = Array.from({ length: 20 }, (_, index) => ({
+    id: `long-server-${index + 1}`,
+    name: `${index + 1}-${'x'.repeat(180)}`
+  }));
+  const rows = servers.map(item => ({
+    server_id: item.id,
+    rx_bytes: 1_000,
+    tx_bytes: 2_000
+  }));
+
+  const reports = buildTrafficReportPayloads(servers, rows, '每日');
+
+  assert.ok(reports.length > 1);
+  assert.ok(reports.every(report => report.msg.length <= 3000));
 });

@@ -31,6 +31,8 @@ const RESOURCE_ALERT_STATE_ACTIVE = 'active';
 const RESOURCE_ALERT_STATE_RECOVERED = 'recovered';
 const RESOURCE_ALERT_STATE_KEY = 'resource_alert_state';
 const DAY_MS = 24 * 60 * 60 * 1000;
+const TRAFFIC_REPORT_SERVER_BATCH_SIZE = 50;
+const TRAFFIC_REPORT_NOTIFICATION_SOFT_LIMIT = 3000;
 
 function isMissingColumnError(error) {
   const message = error?.message || String(error);
@@ -1255,7 +1257,7 @@ export function buildTrafficReportContent(servers, rows, label) {
   let totalTx = 0;
   let measuredCount = 0;
   const missingLabels = {
-    '每日': '暂无上一日数据',
+    '每日': '暂无昨日数据',
     '每周': '暂无上周数据',
     '每月': '暂无上月数据'
   };
@@ -1273,12 +1275,12 @@ export function buildTrafficReportContent(servers, rows, label) {
     totalRx += rx;
     totalTx += tx;
     measuredCount += 1;
-    lines.push(`${server.name}  ↓ ${formatTrafficBytes(rx)}  ↑ ${formatTrafficBytes(tx)}  合计 ${formatTrafficBytes(rx + tx)}`);
+    lines.push(`${server.name}  ↓ ${formatTrafficBytes(rx)} + ↑ ${formatTrafficBytes(tx)}  = ${formatTrafficBytes(rx + tx)}`);
   }
 
   if (lines.length === 0) return null;
   if (measuredCount > 0) {
-    lines.push(`总计  ↓ ${formatTrafficBytes(totalRx)}  ↑ ${formatTrafficBytes(totalTx)}  合计 ${formatTrafficBytes(totalRx + totalTx)}`);
+    lines.push(`总计  ↓ ${formatTrafficBytes(totalRx)} + ↑ ${formatTrafficBytes(totalTx)}  = ${formatTrafficBytes(totalRx + totalTx)}`);
   }
   return {
     msg: lines.join('\n'),
@@ -1292,12 +1294,65 @@ export function buildTrafficReportContent(servers, rows, label) {
   };
 }
 
+export function buildTrafficReportPayloads(servers, rows, label, batchSize = TRAFFIC_REPORT_SERVER_BATCH_SIZE) {
+  const rowServerIds = new Set((Array.isArray(rows) ? rows : []).map(row => row.server_id));
+  const normalizedServers = (Array.isArray(servers) ? servers : [])
+    .filter(server => rowServerIds.has(server.id));
+  const normalizedBatchSize = Math.max(1, Math.floor(Number(batchSize) || TRAFFIC_REPORT_SERVER_BATCH_SIZE));
+  const batches = [];
+  let currentBatch = [];
+
+  for (const server of normalizedServers) {
+    const candidate = [...currentBatch, server];
+    const candidateReport = buildTrafficReportContent(candidate, rows, label);
+    const exceedsCount = candidate.length > normalizedBatchSize;
+    const exceedsLength = currentBatch.length > 0 &&
+      candidateReport?.msg.length > TRAFFIC_REPORT_NOTIFICATION_SOFT_LIMIT;
+    if (exceedsCount || exceedsLength) {
+      batches.push(currentBatch);
+      currentBatch = [server];
+    } else {
+      currentBatch = candidate;
+    }
+  }
+  if (currentBatch.length > 0) batches.push(currentBatch);
+
+  const totalBatches = batches.length;
+  const payloads = [];
+
+  for (let index = 0; index < batches.length; index += 1) {
+    const batchServers = batches[index];
+    const report = buildTrafficReportContent(batchServers, rows, label);
+    if (!report) continue;
+    if (totalBatches > 1) {
+      report.context.event = `${label}流量报告（${index + 1}/${totalBatches}）`;
+    }
+    payloads.push(report);
+  }
+
+  return payloads;
+}
+
 export async function checkTrafficReports(db, options = {}) {
   const settings = await loadSiteSettings(db);
   const now = Number(options.now || Date.now());
   if (!isTrafficReportEnabled(settings, 'traffic_report_enabled')) return false;
   if (options.scheduled && !isExpireNotificationTimeDue(settings, now)) return false;
-  const reportTypes = getDueTrafficReportTypes(now, settings.notification_timezone);
+  const zonedParts = getZonedDateParts(now, settings.notification_timezone);
+  if (options.scheduledMinute !== undefined && Number(zonedParts?.minute) !== Number(options.scheduledMinute)) return false;
+  const dueTypes = getDueTrafficReportTypes(now, settings.notification_timezone);
+  const requestedTypes = Array.isArray(options.reportTypes) && options.reportTypes.length > 0
+    ? new Set(options.reportTypes)
+    : null;
+  let reportTypes = requestedTypes
+    ? dueTypes.filter(type => requestedTypes.has(type))
+    : dueTypes;
+  if (options.staggered && zonedParts) {
+    const baseMinute = 0;
+    const slot = Number(zonedParts.minute) - baseMinute;
+    const slotType = slot === 0 ? 'daily' : slot === 1 ? 'weekly' : slot === 2 ? 'monthly' : null;
+    reportTypes = slotType && dueTypes.includes(slotType) ? [slotType] : [];
+  }
   if (reportTypes.length === 0) return false;
   const servers = await getAllServers(db);
   const latestMetrics = await getLatestMetricsForAllServers(db);
@@ -1336,12 +1391,12 @@ export async function checkTrafficReports(db, options = {}) {
 
     if (!hasNotificationTarget(settings)) return true;
     const reports = [
-      claimedReportTypes.includes('daily') ? buildTrafficReportContent(servers, usageRows.daily, '每日') : null,
-      claimedReportTypes.includes('weekly') ? buildTrafficReportContent(servers, usageRows.weekly, '每周') : null,
-      claimedReportTypes.includes('monthly') ? buildTrafficReportContent(servers, usageRows.monthly, '每月') : null
+      ...(claimedReportTypes.includes('daily') ? buildTrafficReportPayloads(servers, usageRows.daily, '每日') : []),
+      ...(claimedReportTypes.includes('weekly') ? buildTrafficReportPayloads(servers, usageRows.weekly, '每周') : []),
+      ...(claimedReportTypes.includes('monthly') ? buildTrafficReportPayloads(servers, usageRows.monthly, '每月') : [])
     ];
 
-    for (const report of reports.filter(Boolean)) {
+    for (const report of reports) {
       const error = await sendNotification(settings, report.msg, report.context);
       if (error) console.warn('[TrafficReport] notification failed:', error);
     }

@@ -518,6 +518,17 @@ wrangler d1 execute server-monitor-db --file=test/mock-data.sql
 
 See [test/README.md](test/README.md) for more local testing notes.
 
+### Cron Jobs
+
+```
+https://localhost:8787/cdn-cgi/handler/scheduled?cron=*/1+*+*+*+* // Detect offline nodes/resource alerts every minute
+https://localhost:8787/cdn-cgi/handler/scheduled?cron=0+*+*+*+* // Run hourly combined tasks
+https://localhost:8787/cdn-cgi/handler/scheduled?cron=0+0+*+*+0 // Weekly maintenance tasks
+https://localhost:8787/cdn-cgi/handler/scheduled?cron=0+12+*+*+* // Daily maintenance tasks (for testing)
+```
+
+
+
 ### API Check
 
 ```bash

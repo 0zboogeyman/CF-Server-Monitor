@@ -465,6 +465,8 @@ export default {
     const minute = now.getUTCMinutes();
     
     if (cron === '*/1 * * * *') {
+      // Traffic reports must still run during the Sunday table-rotation window.
+      await checkTrafficReports(env.DB, { scheduled: true, staggered: true, now: now.getTime() });
       if (day === 0 && hour === 0 && minute < 5) {
         debug('[Cron] 每周日0:00-0:05表轮换期间，跳过离线节点检测');
       } else {
@@ -483,8 +485,6 @@ export default {
       }
       debug('[Cron] 检查是否到达服务器到期检测时间');
       await checkExpiringServers(env.DB, { scheduled: true, now: now.getTime() });
-      debug('[Cron] 检查是否到达流量报告时间');
-      await checkTrafficReports(env.DB, { scheduled: true, now: now.getTime() });
     }else if(env.DEBUG == 1){
       if (cron === '0 0 * * 0') {
         debug('[Cron DEBUG] 开始执行每周数据清理任务（表轮换）');

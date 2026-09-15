@@ -521,6 +521,16 @@ wrangler d1 execute server-monitor-db --file=test/mock-data.sql
 
 更多本地测试说明见 [test/README.md](test/README.md)。
 
+### 定时任务
+
+```
+https://localhost:8787/cdn-cgi/handler/scheduled?cron=*/1+*+*+*+* // 每分钟执行一次（离线检测）
+https://localhost:8787/cdn-cgi/handler/scheduled?cron=0+*+*+*+* // 每小时执行一次（合并任务）
+https://localhost:8787/cdn-cgi/handler/scheduled?cron=0+0+*+*+0 // 每周执行一次（测试使用）
+https://localhost:8787/cdn-cgi/handler/scheduled?cron=0+12+*+*+* // 每天12点执行一次（测试使用）
+```
+
+
 ### API 检查
 
 ```bash
