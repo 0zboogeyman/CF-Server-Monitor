@@ -6,7 +6,7 @@ import {
 
 export const APPEARANCE_FIELDS = ['site_title', 'custom_bg', 'custom_bg_mobile', 'favicon', 'custom_head', 'custom_script', 'csp_static', 'csp_api', 'display_mode', 'preferred_theme', 'default_language', 'theme_options'];
 
-export const SITE_FIELDS = ['is_public', 'show_price', 'show_expire', 'show_tf', 'show_three_net_details', 'wss_report_enabled', 'wss_report_hours', 'frontend_ws_timeout_minutes', 'long_history_points', 'tg_notify', 'tg_bot_token', 'tg_chat_id', 'notification_timezone', 'expire_notification_time', 'traffic_report_enabled', 'traffic_report_time', 'notification_webhook_enabled', 'notification_webhook_url', 'notification_webhook_method', 'notification_webhook_format', 'notification_webhook_headers', 'notification_webhook_body', 'notification_template', 'turnstile_enabled', 'turnstile_login_enabled', 'turnstile_site_key', 'turnstile_secret_key', 'jwt_secret', 'username', 'password', 'cloudflare_account_id', 'cloudflare_token', 'custom_ct', 'custom_cu', 'custom_cm', 'custom_bd', 'node_1', 'node_2', 'node_3', 'node_4', 'custom_ct_name', 'custom_cu_name', 'custom_cm_name', 'custom_bd_name', 'node_1_name', 'node_2_name', 'node_3_name', 'node_4_name', 'expire_reminder', 'resource_alert_rules', 'theme_url', 'history_id_optimized','servers_optimized'];
+export const SITE_FIELDS = ['is_public', 'show_price', 'show_expire', 'show_tf', 'show_three_net_details', 'wss_report_enabled', 'wss_report_hours', 'frontend_ws_timeout_minutes', 'long_history_points', 'tg_notify', 'tg_bot_token', 'tg_chat_id', 'notification_timezone', 'expire_notification_time', 'traffic_report_enabled', 'notification_webhook_enabled', 'notification_webhook_url', 'notification_webhook_method', 'notification_webhook_format', 'notification_webhook_headers', 'notification_webhook_body', 'notification_template', 'turnstile_enabled', 'turnstile_login_enabled', 'turnstile_site_key', 'turnstile_secret_key', 'jwt_secret', 'username', 'password', 'cloudflare_account_id', 'cloudflare_token', 'custom_ct', 'custom_cu', 'custom_cm', 'custom_bd', 'node_1', 'node_2', 'node_3', 'node_4', 'custom_ct_name', 'custom_cu_name', 'custom_cm_name', 'custom_bd_name', 'node_1_name', 'node_2_name', 'node_3_name', 'node_4_name', 'expire_reminder', 'resource_alert_rules', 'theme_url', 'history_id_optimized','servers_optimized'];
 
 export const TG_NOTIFY_MINUTES_MIN = 2;
 export const TG_NOTIFY_MINUTES_MAX = 30;
@@ -85,7 +85,6 @@ const defaults = {
   notification_timezone: DEFAULT_NOTIFICATION_TIMEZONE,
   expire_notification_time: DEFAULT_EXPIRE_NOTIFICATION_TIME,
   traffic_report_enabled: 'false',
-  traffic_report_time: '9',
   notification_webhook_enabled: 'false',
   notification_webhook_url: '',
   notification_webhook_method: 'POST',
@@ -662,7 +661,6 @@ export async function loadSiteSettings(db, options = {}) {
     result.notification_timezone = normalizeNotificationTimezone(result.notification_timezone);
     result.expire_notification_time = normalizeExpireNotificationTime(result.expire_notification_time);
     result.traffic_report_enabled = normalizeBooleanSetting(result.traffic_report_enabled);
-    result.traffic_report_time = normalizeExpireNotificationTime(result.traffic_report_time);
   } catch (e) {
     console.error('加载站点设置失败:', e);
   }
@@ -789,7 +787,6 @@ export async function saveSiteOptions(db, updates) {
   siteOptions.notification_timezone = normalizeNotificationTimezone(siteOptions.notification_timezone);
   siteOptions.expire_notification_time = normalizeExpireNotificationTime(siteOptions.expire_notification_time);
   siteOptions.traffic_report_enabled = normalizeBooleanSetting(siteOptions.traffic_report_enabled);
-  siteOptions.traffic_report_time = normalizeExpireNotificationTime(siteOptions.traffic_report_time);
   
   await db.prepare(
     'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'

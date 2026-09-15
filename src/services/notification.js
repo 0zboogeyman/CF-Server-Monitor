@@ -1,4 +1,5 @@
 import { getLatestMetricsForAllServers } from '../database/schema.js';
+import { updateDatabase } from '../database/updateDatabase.js';
 import { clearServersListCache, getAllServers } from '../utils/cache.js';
 import {
   DEFAULT_NOTIFICATION_TEMPLATE,
@@ -30,6 +31,27 @@ const RESOURCE_ALERT_STATE_ACTIVE = 'active';
 const RESOURCE_ALERT_STATE_RECOVERED = 'recovered';
 const RESOURCE_ALERT_STATE_KEY = 'resource_alert_state';
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+function isMissingColumnError(error) {
+  const message = error?.message || String(error);
+  return /no such column|has no column/i.test(message);
+}
+
+async function saveTrafficSnapshots(db, snapshots, serverId) {
+  const write = () => db.prepare('UPDATE servers SET traffic_snapshots = ? WHERE id = ?')
+    .bind(JSON.stringify(snapshots), serverId).run();
+
+  try {
+    await write();
+  } catch (error) {
+    if (!isMissingColumnError(error)) throw error;
+
+    console.warn('[TrafficReport] 检测到数据库字段缺失，尝试升级数据库后重试...');
+    const upgrade = await updateDatabase(db);
+    if (!upgrade?.success) throw error;
+    await write();
+  }
+}
 
 function getZonedDateParts(timestamp = Date.now(), timezone = 'UTC') {
   const date = new Date(timestamp);
@@ -77,12 +99,6 @@ function isExpireNotificationTimeDue(settings = {}, timestamp = Date.now()) {
   const parts = getZonedDateParts(timestamp, settings.notification_timezone);
   if (!parts) return false;
   return Number(parts.hour) === Number(normalizeExpireNotificationTime(settings.expire_notification_time));
-}
-
-function isTrafficReportTimeDue(settings = {}, timestamp = Date.now()) {
-  const parts = getZonedDateParts(timestamp, settings.notification_timezone);
-  if (!parts) return false;
-  return Number(parts.hour) === Number(normalizeExpireNotificationTime(settings.traffic_report_time));
 }
 
 function getZonedDateSerial(timestamp, timezone) {
@@ -1166,7 +1182,50 @@ export function getDueTrafficReportTypes(timestamp, timezone) {
   return types;
 }
 
-export function updateTrafficSnapshots(value, currentRx, currentTx, timestamp, types) {
+function isPreviousTrafficPeriod(snapshot, timestamp, type, timezone) {
+  const previousTimestamp = Number(snapshot?.time) * 1000;
+  if (!Number.isFinite(previousTimestamp) || previousTimestamp >= timestamp) return false;
+
+  const currentKeys = getTrafficPeriodKeys(timestamp, timezone);
+  const previousKeys = getTrafficPeriodKeys(previousTimestamp, timezone);
+  if (!currentKeys || !previousKeys) return false;
+
+  if (type === 'daily') {
+    return parseDateSerial(currentKeys.daily) - parseDateSerial(previousKeys.daily) === 1;
+  }
+  if (type === 'weekly') {
+    return parseDateSerial(currentKeys.weekly) - parseDateSerial(previousKeys.weekly) === 7;
+  }
+  if (type === 'monthly') {
+    const currentParts = getZonedDateParts(timestamp, timezone);
+    const previousParts = getZonedDateParts(previousTimestamp, timezone);
+    return currentParts && previousParts &&
+      (Number(currentParts.year) * 12 + Number(currentParts.month)) -
+      (Number(previousParts.year) * 12 + Number(previousParts.month)) === 1;
+  }
+  return false;
+}
+
+async function claimTrafficReportTypes(db, reportTypes, periodKeys) {
+  const claimedTypes = [];
+  for (const type of reportTypes) {
+    const result = await db.prepare(`
+      INSERT INTO settings (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      WHERE value <> excluded.value
+    `).bind(`traffic_report_last_${type}`, periodKeys[type]).run();
+    if (result.meta?.changes > 0) claimedTypes.push(type);
+  }
+  return claimedTypes;
+}
+
+async function releaseTrafficReportTypes(db, reportTypes, periodKeys) {
+  await Promise.all(reportTypes.map(type => db.prepare(
+    'DELETE FROM settings WHERE key = ? AND value = ?'
+  ).bind(`traffic_report_last_${type}`, periodKeys[type]).run()));
+}
+
+export function updateTrafficSnapshots(value, currentRx, currentTx, timestamp, types, timezone = 'UTC') {
   const snapshots = normalizeTrafficSnapshots(value);
   const nowSeconds = Math.floor(timestamp / 1000);
   const rx = Math.max(0, Number(currentRx) || 0);
@@ -1176,7 +1235,7 @@ export function updateTrafficSnapshots(value, currentRx, currentTx, timestamp, t
 
   for (const type of types) {
     const previous = snapshots[type];
-    if (previous) {
+    if (previous && isPreviousTrafficPeriod(previous, timestamp, type, timezone)) {
       usage[type] = {
         rx_bytes: calculateTrafficDelta(rx, previous.rx_bytes),
         tx_bytes: calculateTrafficDelta(tx, previous.tx_bytes)
@@ -1237,48 +1296,65 @@ export async function checkTrafficReports(db, options = {}) {
   const settings = await loadSiteSettings(db);
   const now = Number(options.now || Date.now());
   if (!isTrafficReportEnabled(settings, 'traffic_report_enabled')) return false;
-  if (options.scheduled && !isTrafficReportTimeDue(settings, now)) return false;
+  if (options.scheduled && !isExpireNotificationTimeDue(settings, now)) return false;
   const reportTypes = getDueTrafficReportTypes(now, settings.notification_timezone);
   if (reportTypes.length === 0) return false;
   const servers = await getAllServers(db);
   const latestMetrics = await getLatestMetricsForAllServers(db);
-  const usageRows = { daily: [], weekly: [], monthly: [] };
+  const periodKeys = getTrafficPeriodKeys(now, settings.notification_timezone);
+  const claimedReportTypes = await claimTrafficReportTypes(
+    db,
+    reportTypes,
+    periodKeys
+  );
+  if (claimedReportTypes.length === 0) return false;
 
-  for (const server of servers) {
-    const metrics = latestMetrics.get(server.id);
-    if (!metrics) continue;
-    const result = updateTrafficSnapshots(
-      server.traffic_snapshots,
-      metrics.net_rx,
-      metrics.net_tx,
-      now,
-      reportTypes
-    );
-    for (const type of reportTypes) {
-      usageRows[type].push(result.usage[type]
-        ? { server_id: server.id, ...result.usage[type] }
-        : { server_id: server.id, missing: true });
+  try {
+    const usageRows = { daily: [], weekly: [], monthly: [] };
+
+    for (const server of servers) {
+      const metrics = latestMetrics.get(server.id);
+      if (!metrics) continue;
+      const result = updateTrafficSnapshots(
+        server.traffic_snapshots,
+        metrics.net_rx,
+        metrics.net_tx,
+        now,
+        claimedReportTypes,
+        settings.notification_timezone
+      );
+      for (const type of claimedReportTypes) {
+        usageRows[type].push(result.usage[type]
+          ? { server_id: server.id, ...result.usage[type] }
+          : { server_id: server.id, missing: true });
+      }
+      if (result.changed) {
+        await saveTrafficSnapshots(db, result.snapshots, server.id);
+        server.traffic_snapshots = JSON.stringify(result.snapshots);
+      }
     }
-    if (result.changed) {
-      await db.prepare('UPDATE servers SET traffic_snapshots = ? WHERE id = ?')
-        .bind(JSON.stringify(result.snapshots), server.id).run();
-      server.traffic_snapshots = JSON.stringify(result.snapshots);
+
+    if (!hasNotificationTarget(settings)) return true;
+    const reports = [
+      claimedReportTypes.includes('daily') ? buildTrafficReportContent(servers, usageRows.daily, '每日') : null,
+      claimedReportTypes.includes('weekly') ? buildTrafficReportContent(servers, usageRows.weekly, '每周') : null,
+      claimedReportTypes.includes('monthly') ? buildTrafficReportContent(servers, usageRows.monthly, '每月') : null
+    ];
+
+    for (const report of reports.filter(Boolean)) {
+      const error = await sendNotification(settings, report.msg, report.context);
+      if (error) console.warn('[TrafficReport] notification failed:', error);
     }
+
+    return true;
+  } catch (error) {
+    try {
+      await releaseTrafficReportTypes(db, claimedReportTypes, periodKeys);
+    } catch (releaseError) {
+      console.warn('[TrafficReport] failed to release report claim:', releaseError);
+    }
+    throw error;
   }
-
-  if (!hasNotificationTarget(settings)) return true;
-  const reports = [
-    reportTypes.includes('daily') ? buildTrafficReportContent(servers, usageRows.daily, '每日') : null,
-    reportTypes.includes('weekly') ? buildTrafficReportContent(servers, usageRows.weekly, '每周') : null,
-    reportTypes.includes('monthly') ? buildTrafficReportContent(servers, usageRows.monthly, '每月') : null
-  ];
-
-  for (const report of reports.filter(Boolean)) {
-    const error = await sendNotification(settings, report.msg, report.context);
-    if (error) console.warn('[TrafficReport] notification failed:', error);
-  }
-
-  return true;
 }
 
 export async function checkExpiringServers(db, options = {}) {

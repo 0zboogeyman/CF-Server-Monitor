@@ -41,6 +41,20 @@ test('traffic snapshots calculate usage and roll only crossed period boundaries'
   assert.equal(monday.snapshots.monthly.rx_bytes, 10_000);
 });
 
+test('traffic snapshots mark missed report periods as unavailable instead of overcounting', () => {
+  const first = updateTrafficSnapshots('{}', 10_000, 20_000, Date.UTC(2026, 8, 1, 1), ['daily']);
+  const afterMissedDays = updateTrafficSnapshots(
+    first.snapshots,
+    25_000,
+    40_000,
+    Date.UTC(2026, 8, 4, 1),
+    ['daily']
+  );
+
+  assert.equal(afterMissedDays.usage.daily, undefined);
+  assert.equal(afterMissedDays.snapshots.daily.rx_bytes, 25_000);
+});
+
 test('traffic snapshot period keys honor the configured notification timezone', () => {
   const sundayUtc = Date.UTC(2026, 8, 6, 16, 30);
   assert.deepEqual(getTrafficPeriodKeys(sundayUtc, timezone), {

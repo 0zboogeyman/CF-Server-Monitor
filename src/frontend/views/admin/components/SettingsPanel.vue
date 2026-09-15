@@ -281,6 +281,19 @@
 
           <div class="form-group flex-1">
             <label class="form-label">
+              {{ trans.trafficReport || 'Traffic reports' }}
+              <HelpTooltip
+                :text="`⚠️ ${trans.trafficReportRestartWarning || 'Traffic uses network-interface counters. A server or Agent restart may reset them and make the current report period inaccurate.'}`"
+              />
+            </label>
+            <select v-model="settings.traffic_report_enabled" class="form-select">
+              <option :value="false">{{ trans.disabled || 'Disabled' }}</option>
+              <option :value="true">{{ trans.enabled || 'Enabled' }}</option>
+            </select>
+          </div>
+
+          <div class="form-group flex-1">
+            <label class="form-label">
               {{ trans.expireNotificationTime || 'Expiration Notification Time' }}
               <HelpTooltip :text="trans.expireNotificationTimeTip || 'Check expiration and send reminders daily at this hour in the notification timezone. Use 0-23.'" />
             </label>
@@ -288,28 +301,6 @@
               <option v-for="hour in expireNotificationHourOptions" :key="hour" :value="hour">{{ hour }}</option>
             </select>
           </div>
-        </div>
-
-        <div class="form-row">
-          <div class="form-group flex-1 checkbox-item">
-            <input type="checkbox" id="cfg_traffic_report_enabled" v-model="settings.traffic_report_enabled">
-            <label>{{ trans.trafficReportEnabled || 'Enable traffic reports' }}</label>
-          </div>
-          <div class="form-group flex-1">
-            <label class="form-label">
-              {{ trans.trafficReportTime || 'Traffic report time' }}
-              <HelpTooltip :text="trans.trafficReportTip || 'Daily reports run every day, weekly reports on Monday, and monthly reports on the first day in the notification timezone.'" />
-            </label>
-            <select v-model="settings.traffic_report_time" class="form-select">
-              <option v-for="hour in expireNotificationHourOptions" :key="hour" :value="hour">{{ hour }}</option>
-            </select>
-          </div>
-        </div>
-        <div
-          v-if="settings.traffic_report_enabled"
-          class="admin-warning-text"
-        >
-          ⚠️ {{ trans.trafficReportRestartWarning || 'Traffic uses network-interface counters. A server or Agent restart may reset them and make the current report period inaccurate.' }}
         </div>
 
         <div v-if="notificationChannel === 'builtin'" class="form-row">

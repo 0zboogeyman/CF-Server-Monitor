@@ -886,8 +886,6 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
             siteOptions[field] = normalizeNotificationTimezone(settings[field]);
           } else if (field === 'expire_notification_time') {
             siteOptions[field] = normalizeExpireNotificationTime(settings[field]);
-          } else if (field === 'traffic_report_time') {
-            siteOptions[field] = normalizeExpireNotificationTime(settings[field]);
           } else if (field === 'traffic_report_enabled') {
             siteOptions[field] = normalizeBooleanSetting(settings[field]);
           } else if (field === 'notification_webhook_enabled') {
