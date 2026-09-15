@@ -1111,7 +1111,7 @@ export async function checkResourceAlerts(env) {
   }
 }
 
-async function ensureTrafficDailyTable(db) {
+export async function ensureTrafficDailyTable(db) {
   await db.prepare(`
     CREATE TABLE IF NOT EXISTS traffic_daily (
       report_date TEXT NOT NULL,
@@ -1130,14 +1130,15 @@ async function ensureTrafficDailyTable(db) {
   `).run();
 }
 
-async function buildTrafficReport(db, servers, startDate, endDate, label) {
-  const rows = await db.prepare(`
-    SELECT server_id, SUM(rx_bytes) AS rx_bytes, SUM(tx_bytes) AS tx_bytes
-    FROM traffic_daily
-    WHERE report_date >= ? AND report_date <= ?
-    GROUP BY server_id
-  `).bind(startDate, endDate).all();
-  const usageByServer = new Map((rows.results || []).map(row => [row.server_id, row]));
+export function calculateTrafficDelta(current, previous) {
+  const currentValue = Math.max(0, Number(current) || 0);
+  if (previous === null || previous === undefined) return 0;
+  const previousValue = Math.max(0, Number(previous) || 0);
+  return currentValue >= previousValue ? currentValue - previousValue : currentValue;
+}
+
+export function buildTrafficReportContent(servers, rows, startDate, endDate, label) {
+  const usageByServer = new Map((rows || []).map(row => [row.server_id, row]));
   const lines = [];
   const clients = [];
   let totalRx = 0;
@@ -1168,8 +1169,68 @@ async function buildTrafficReport(db, servers, startDate, endDate, label) {
   };
 }
 
+async function buildTrafficReport(db, servers, startDate, endDate, label) {
+  const rows = await db.prepare(`
+    SELECT server_id, SUM(rx_bytes) AS rx_bytes, SUM(tx_bytes) AS tx_bytes
+    FROM traffic_daily
+    WHERE report_date >= ? AND report_date <= ?
+    GROUP BY server_id
+  `).bind(startDate, endDate).all();
+  return buildTrafficReportContent(servers, rows.results || [], startDate, endDate, label);
+}
+
+export function getTrafficReportPeriods(todaySerial, todayParts, enabled = {}) {
+  const reportDate = formatDateSerial(todaySerial - 1);
+  const periods = [];
+  if (enabled.daily) periods.push({ startDate: reportDate, endDate: reportDate, label: '每日' });
+
+  const weekday = ((todaySerial + 4) % 7 + 7) % 7;
+  if (enabled.weekly && weekday === 1) {
+    periods.push({ startDate: formatDateSerial(todaySerial - 7), endDate: reportDate, label: '每周' });
+  }
+
+  if (enabled.monthly && Number(todayParts?.day) === 1) {
+    const previousMonthEnd = todaySerial - 1;
+    const previousMonthDate = new Date(previousMonthEnd * DAY_MS);
+    const previousMonthStart = Math.floor(Date.UTC(previousMonthDate.getUTCFullYear(), previousMonthDate.getUTCMonth(), 1) / DAY_MS);
+    periods.push({ startDate: formatDateSerial(previousMonthStart), endDate: reportDate, label: '每月' });
+  }
+  return periods;
+}
+
+export async function recordDailyTraffic(db, servers, latestMetrics, reportDate, now = Date.now()) {
+  let inserted = false;
+  let hasMeasuredUsage = false;
+  for (const server of servers) {
+    const metrics = latestMetrics.get(server.id);
+    if (!metrics) continue;
+    const currentRx = Math.max(0, Number(metrics.net_rx_monthly) || 0);
+    const currentTx = Math.max(0, Number(metrics.net_tx_monthly) || 0);
+    const previous = await db.prepare(`
+      SELECT snapshot_rx, snapshot_tx FROM traffic_daily
+      WHERE server_id = ? ORDER BY report_date DESC LIMIT 1
+    `).bind(server.id).first();
+    hasMeasuredUsage = hasMeasuredUsage || Boolean(previous);
+    const result = await db.prepare(`
+      INSERT OR IGNORE INTO traffic_daily
+      (report_date, server_id, rx_bytes, tx_bytes, snapshot_rx, snapshot_tx, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      reportDate,
+      server.id,
+      calculateTrafficDelta(currentRx, previous?.snapshot_rx),
+      calculateTrafficDelta(currentTx, previous?.snapshot_tx),
+      currentRx,
+      currentTx,
+      now
+    ).run();
+    inserted = inserted || Number(result.meta?.changes || 0) > 0;
+  }
+  return { inserted, hasMeasuredUsage };
+}
+
 export async function checkTrafficReports(db, options = {}) {
-  const settings = options.settings || await loadSiteSettings(db);
+  const settings = await loadSiteSettings(db);
   const dailyEnabled = isTrafficReportEnabled(settings, 'traffic_report_daily');
   const weeklyEnabled = isTrafficReportEnabled(settings, 'traffic_report_weekly');
   const monthlyEnabled = isTrafficReportEnabled(settings, 'traffic_report_monthly');
@@ -1181,51 +1242,23 @@ export async function checkTrafficReports(db, options = {}) {
   const todaySerial = getZonedDateSerial(now, settings.notification_timezone);
   if (!Number.isFinite(todaySerial)) return false;
   const reportDate = formatDateSerial(todaySerial - 1);
-  const servers = options.servers || await getAllServers(db);
-  const latestMetrics = options.latestMetrics || await getLatestMetricsForAllServers(db);
-  let inserted = false;
-  let hasMeasuredUsage = false;
-
-  for (const server of servers) {
-    const metrics = latestMetrics.get(server.id);
-    if (!metrics) continue;
-    const currentRx = Math.max(0, Number(metrics.net_rx_monthly) || 0);
-    const currentTx = Math.max(0, Number(metrics.net_tx_monthly) || 0);
-    const previous = await db.prepare(`
-      SELECT snapshot_rx, snapshot_tx FROM traffic_daily
-      WHERE server_id = ? ORDER BY report_date DESC LIMIT 1
-    `).bind(server.id).first();
-    hasMeasuredUsage = hasMeasuredUsage || Boolean(previous);
-    const rx = previous ? (currentRx >= Number(previous.snapshot_rx) ? currentRx - Number(previous.snapshot_rx) : currentRx) : 0;
-    const tx = previous ? (currentTx >= Number(previous.snapshot_tx) ? currentTx - Number(previous.snapshot_tx) : currentTx) : 0;
-    const result = await db.prepare(`
-      INSERT OR IGNORE INTO traffic_daily
-      (report_date, server_id, rx_bytes, tx_bytes, snapshot_rx, snapshot_tx, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).bind(reportDate, server.id, rx, tx, currentRx, currentTx, now).run();
-    inserted = inserted || Number(result.meta?.changes || 0) > 0;
-  }
+  const servers = await getAllServers(db);
+  const latestMetrics = await getLatestMetricsForAllServers(db);
+  const { inserted, hasMeasuredUsage } = await recordDailyTraffic(db, servers, latestMetrics, reportDate, now);
 
   if (!inserted || !hasMeasuredUsage) return false;
-  const reports = [];
-  if (dailyEnabled) reports.push(await buildTrafficReport(db, servers, reportDate, reportDate, '每日'));
-
-  const weekday = ((todaySerial + 4) % 7 + 7) % 7;
-  if (weeklyEnabled && weekday === 1) {
-    reports.push(await buildTrafficReport(db, servers, formatDateSerial(todaySerial - 7), reportDate, '每周'));
-  }
-
   const todayParts = getZonedDateParts(now, settings.notification_timezone);
-  if (monthlyEnabled && Number(todayParts?.day) === 1) {
-    const previousMonthEnd = todaySerial - 1;
-    const previousMonthDate = new Date(previousMonthEnd * DAY_MS);
-    const previousMonthStart = Math.floor(Date.UTC(previousMonthDate.getUTCFullYear(), previousMonthDate.getUTCMonth(), 1) / DAY_MS);
-    reports.push(await buildTrafficReport(db, servers, formatDateSerial(previousMonthStart), reportDate, '每月'));
-  }
+  const periods = getTrafficReportPeriods(todaySerial, todayParts, {
+    daily: dailyEnabled,
+    weekly: weeklyEnabled,
+    monthly: monthlyEnabled
+  });
+  const reports = await Promise.all(periods.map(period =>
+    buildTrafficReport(db, servers, period.startDate, period.endDate, period.label)
+  ));
 
   for (const report of reports.filter(Boolean)) {
-    const notify = options.sendNotification || sendNotification;
-    const error = await notify(settings, report.msg, report.context);
+    const error = await sendNotification(settings, report.msg, report.context);
     if (error) console.warn('[TrafficReport] notification failed:', error);
   }
 
