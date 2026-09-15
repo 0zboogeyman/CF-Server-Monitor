@@ -787,10 +787,11 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
         ? normalizeResourceAlertRules(settings.resource_alert_rules)
         : currentResourceAlertRules;
       const resourceAlertEnabled = normalizedResourceAlertRules.length > 0;
-      const trafficReportEnabled = ['traffic_report_daily', 'traffic_report_weekly', 'traffic_report_monthly']
-        .some(field => normalizeBooleanSetting(
-          settings[field] !== undefined ? settings[field] : sys?.[field]
-        ) === 'true');
+      const trafficReportEnabled = normalizeBooleanSetting(
+        settings.traffic_report_enabled !== undefined
+          ? settings.traffic_report_enabled
+          : sys?.traffic_report_enabled
+      ) === 'true';
       if (tgNotify !== '0' || expireReminder !== '0' || resourceAlertEnabled || trafficReportEnabled) {
         const webhookEnabled = settings.notification_webhook_enabled !== undefined
           ? normalizeBooleanSetting(settings.notification_webhook_enabled) === 'true'
@@ -887,7 +888,7 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
             siteOptions[field] = normalizeExpireNotificationTime(settings[field]);
           } else if (field === 'traffic_report_time') {
             siteOptions[field] = normalizeExpireNotificationTime(settings[field]);
-          } else if (field === 'traffic_report_daily' || field === 'traffic_report_weekly' || field === 'traffic_report_monthly') {
+          } else if (field === 'traffic_report_enabled') {
             siteOptions[field] = normalizeBooleanSetting(settings[field]);
           } else if (field === 'notification_webhook_enabled') {
             siteOptions[field] = normalizeBooleanSetting(settings[field]);

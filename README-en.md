@@ -348,7 +348,7 @@ Supported alert types:
 - Offline alert: notify after a node stays offline for the configured delay; send recovery notice when it returns.
 - Expiration reminder: notify daily 1 to 7 days before expiration at the configured notification timezone and expiration notification time, or disable it.
 - Resource alert: define rules for CPU, memory, disk, inbound/outbound network speed, and similar metrics.
-- Traffic reports: daily, weekly, and monthly reports can be enabled independently using three lightweight JSON network-counter baselines in the notification timezone. Daily reports are sent every day, weekly reports on Monday, and monthly reports on the first day. A missing previous baseline is reported as unavailable. Server or Agent restarts may reset interface counters and affect the current period.
+- Traffic reports: when enabled, three lightweight JSON network-counter baselines are maintained in the notification timezone. Daily reports are sent every day, weekly reports on Monday, and monthly reports on the first day. A missing previous baseline is reported as unavailable. Server or Agent restarts may reset interface counters and affect the current period.
 
 Send a test notification before saving.
 

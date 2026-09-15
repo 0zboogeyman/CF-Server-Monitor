@@ -1153,16 +1153,16 @@ export function getTrafficPeriodKeys(timestamp, timezone) {
   };
 }
 
-export function getDueTrafficReportTypes(timestamp, timezone, enabled = {}) {
+export function getDueTrafficReportTypes(timestamp, timezone) {
   const keys = getTrafficPeriodKeys(timestamp, timezone);
   if (!keys) return [];
   const parts = getZonedDateParts(timestamp, timezone);
   const serial = getZonedDateSerial(timestamp, timezone);
   const weekday = ((serial + 4) % 7 + 7) % 7;
   const types = [];
-  if (enabled.daily) types.push('daily');
-  if (enabled.weekly && weekday === 1) types.push('weekly');
-  if (enabled.monthly && Number(parts.day) === 1) types.push('monthly');
+  types.push('daily');
+  if (weekday === 1) types.push('weekly');
+  if (Number(parts.day) === 1) types.push('monthly');
   return types;
 }
 
@@ -1235,17 +1235,10 @@ export function buildTrafficReportContent(servers, rows, label) {
 
 export async function checkTrafficReports(db, options = {}) {
   const settings = await loadSiteSettings(db);
-  const dailyEnabled = isTrafficReportEnabled(settings, 'traffic_report_daily');
-  const weeklyEnabled = isTrafficReportEnabled(settings, 'traffic_report_weekly');
-  const monthlyEnabled = isTrafficReportEnabled(settings, 'traffic_report_monthly');
   const now = Number(options.now || Date.now());
-  if (!dailyEnabled && !weeklyEnabled && !monthlyEnabled) return false;
+  if (!isTrafficReportEnabled(settings, 'traffic_report_enabled')) return false;
   if (options.scheduled && !isTrafficReportTimeDue(settings, now)) return false;
-  const reportTypes = getDueTrafficReportTypes(now, settings.notification_timezone, {
-    daily: dailyEnabled,
-    weekly: weeklyEnabled,
-    monthly: monthlyEnabled
-  });
+  const reportTypes = getDueTrafficReportTypes(now, settings.notification_timezone);
   if (reportTypes.length === 0) return false;
   const servers = await getAllServers(db);
   const latestMetrics = await getLatestMetricsForAllServers(db);

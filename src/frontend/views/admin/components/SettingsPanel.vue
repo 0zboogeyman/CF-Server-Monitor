@@ -292,16 +292,8 @@
 
         <div class="form-row">
           <div class="form-group flex-1 checkbox-item">
-            <input type="checkbox" id="cfg_traffic_report_daily" v-model="settings.traffic_report_daily">
-            <label>{{ trans.trafficReportDaily || 'Daily traffic report' }}</label>
-          </div>
-          <div class="form-group flex-1 checkbox-item">
-            <input type="checkbox" id="cfg_traffic_report_weekly" v-model="settings.traffic_report_weekly">
-            <label>{{ trans.trafficReportWeekly || 'Weekly traffic report' }}</label>
-          </div>
-          <div class="form-group flex-1 checkbox-item">
-            <input type="checkbox" id="cfg_traffic_report_monthly" v-model="settings.traffic_report_monthly">
-            <label>{{ trans.trafficReportMonthly || 'Monthly traffic report' }}</label>
+            <input type="checkbox" id="cfg_traffic_report_enabled" v-model="settings.traffic_report_enabled">
+            <label>{{ trans.trafficReportEnabled || 'Enable traffic reports' }}</label>
           </div>
           <div class="form-group flex-1">
             <label class="form-label">
@@ -314,7 +306,7 @@
           </div>
         </div>
         <div
-          v-if="settings.traffic_report_daily || settings.traffic_report_weekly || settings.traffic_report_monthly"
+          v-if="settings.traffic_report_enabled"
           class="admin-warning-text"
         >
           ⚠️ {{ trans.trafficReportRestartWarning || 'Traffic uses network-interface counters. A server or Agent restart may reset them and make the current report period inaccurate.' }}

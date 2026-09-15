@@ -943,9 +943,7 @@ const settings = ref({
   tg_chat_id: '',
   notification_timezone: 'UTC',
   expire_notification_time: '12',
-  traffic_report_daily: false,
-  traffic_report_weekly: false,
-  traffic_report_monthly: false,
+  traffic_report_enabled: false,
   traffic_report_time: '9',
   notification_webhook_enabled: false,
   notification_webhook_url: '',
@@ -1396,9 +1394,7 @@ const loadSettings = async () => {
         tg_chat_id: settingsData.tg_chat_id || '',
         notification_timezone: normalizeNotificationTimezoneSetting(settingsData.notification_timezone),
         expire_notification_time: normalizeExpireNotificationTimeSetting(settingsData.expire_notification_time),
-        traffic_report_daily: settingsData.traffic_report_daily === 'true' || settingsData.traffic_report_daily === true,
-        traffic_report_weekly: settingsData.traffic_report_weekly === 'true' || settingsData.traffic_report_weekly === true,
-        traffic_report_monthly: settingsData.traffic_report_monthly === 'true' || settingsData.traffic_report_monthly === true,
+        traffic_report_enabled: settingsData.traffic_report_enabled === 'true' || settingsData.traffic_report_enabled === true,
         traffic_report_time: normalizeExpireNotificationTimeSetting(settingsData.traffic_report_time || '9'),
         notification_webhook_enabled: settingsData.notification_webhook_enabled === 'true' || settingsData.notification_webhook_enabled === true,
         notification_webhook_url: settingsData.notification_webhook_url || '',
@@ -1514,7 +1510,7 @@ const saveSettings = async () => {
     }
   }
 
-  const isTrafficReportEnabled = settings.value.traffic_report_daily || settings.value.traffic_report_weekly || settings.value.traffic_report_monthly
+  const isTrafficReportEnabled = settings.value.traffic_report_enabled
   if (isTgNotifyEnabled(settings.value.tg_notify) || isExpireReminderEnabled(settings.value.expire_reminder) || isResourceAlertEnabled(settings.value.resource_alert_rules) || isTrafficReportEnabled) {
     if (isNotificationWebhookEnabled()) {
       if (!settings.value.notification_webhook_url || settings.value.notification_webhook_url.trim().length === 0) {
@@ -1581,9 +1577,7 @@ const saveSettings = async () => {
       tg_chat_id: settings.value.tg_chat_id,
       notification_timezone: normalizeNotificationTimezoneSetting(settings.value.notification_timezone),
       expire_notification_time: normalizeExpireNotificationTimeSetting(settings.value.expire_notification_time),
-      traffic_report_daily: settings.value.traffic_report_daily ? 'true' : 'false',
-      traffic_report_weekly: settings.value.traffic_report_weekly ? 'true' : 'false',
-      traffic_report_monthly: settings.value.traffic_report_monthly ? 'true' : 'false',
+      traffic_report_enabled: settings.value.traffic_report_enabled ? 'true' : 'false',
       traffic_report_time: normalizeExpireNotificationTimeSetting(settings.value.traffic_report_time),
       notification_webhook_enabled: settings.value.notification_webhook_enabled ? 'true' : 'false',
       notification_webhook_url: settings.value.notification_webhook_url,

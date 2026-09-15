@@ -49,11 +49,7 @@ test('traffic snapshot period keys honor the configured notification timezone', 
     monthly: '2026-09'
   });
 
-  assert.deepEqual(getDueTrafficReportTypes(sundayUtc, timezone, {
-    daily: true,
-    weekly: true,
-    monthly: true
-  }), ['daily', 'weekly']);
+  assert.deepEqual(getDueTrafficReportTypes(sundayUtc, timezone), ['daily', 'weekly']);
 
   const monthStart = updateTrafficSnapshots('{}', 1_000, 2_000, Date.UTC(2026, 8, 30, 15), ['monthly']);
   const october = updateTrafficSnapshots(monthStart.snapshots, 3_000, 5_000, Date.UTC(2026, 8, 30, 16), ['monthly']);
