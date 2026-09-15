@@ -290,6 +290,30 @@
           </div>
         </div>
 
+        <div class="form-row">
+          <div class="form-group flex-1 checkbox-item">
+            <input type="checkbox" id="cfg_traffic_report_daily" v-model="settings.traffic_report_daily">
+            <label>{{ trans.trafficReportDaily || 'Daily traffic report' }}</label>
+          </div>
+          <div class="form-group flex-1 checkbox-item">
+            <input type="checkbox" id="cfg_traffic_report_weekly" v-model="settings.traffic_report_weekly">
+            <label>{{ trans.trafficReportWeekly || 'Weekly traffic report' }}</label>
+          </div>
+          <div class="form-group flex-1 checkbox-item">
+            <input type="checkbox" id="cfg_traffic_report_monthly" v-model="settings.traffic_report_monthly">
+            <label>{{ trans.trafficReportMonthly || 'Monthly traffic report' }}</label>
+          </div>
+          <div class="form-group flex-1">
+            <label class="form-label">
+              {{ trans.trafficReportTime || 'Traffic report time' }}
+              <HelpTooltip :text="trans.trafficReportTip || 'Daily report; weekly report on Monday; monthly report on the first day, using the notification timezone.'" />
+            </label>
+            <select v-model="settings.traffic_report_time" class="form-select">
+              <option v-for="hour in expireNotificationHourOptions" :key="hour" :value="hour">{{ hour }}</option>
+            </select>
+          </div>
+        </div>
+
         <div v-if="notificationChannel === 'builtin'" class="form-row">
           <div class="form-group flex-1">
             <label class="form-label">{{ trans.telegramToken }}</label>
