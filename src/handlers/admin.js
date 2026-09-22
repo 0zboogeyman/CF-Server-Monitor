@@ -6,7 +6,7 @@ import { mergeMetricsIntoServer } from '../utils/metrics.js';
 import { verifyTurnstileToken, hashPassword } from '../utils/common.js';
 import { AppError, createSuccessResponse, createBadRequestResponse, createUnauthorizedResponse, createErrorResponse } from '../utils/errors.js';
 import { addServerColumns } from '../database/updateDatabase.js';
-import { clearResourceAlertState, sendNotification } from '../services/notification.js';
+import { clearResourceAlertState, isSmtpNotificationTarget, sendNotification } from '../services/notification.js';
 import { getNextServerHistoryPartitionId, HISTORY_MAX_PARTITION_ID } from '../database/indexOptimization.js';
 import { isValidTrafficCorrection, normalizeConnectionMode, normalizePingMode, normalizeWssReportInterval, validateAgentConfigInput, validatePingNode, validateNetworkInterfaces } from '../utils/agentConfig.js';
 import { scheduleAgentConfigChanged, scheduleAgentReportModeChanged } from '../utils/agentConfigNotify.js';
@@ -701,6 +701,8 @@ async function handleSendTestNotificationAction({ data }) {
     if (!notification_webhook_url || String(notification_webhook_url).trim().length === 0) {
       return createBadRequestResponse('notificationWebhookUrlRequired');
     }
+  } else if (isSmtpNotificationTarget(tg_bot_token)) {
+    // SMTP 邮件渠道（smtp:// 前缀）视为有效的内置通知目标
   } else if (!tg_bot_token || tg_bot_token.trim().length === 0) {
     return createBadRequestResponse('tgBotTokenRequired');
   }
@@ -832,6 +834,8 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
           if (!effectiveWebhookUrl || String(effectiveWebhookUrl).trim().length === 0) {
             return createBadRequestResponse('notificationWebhookUrlRequired');
           }
+        } else if (isSmtpNotificationTarget(effectiveTgBotToken)) {
+          // SMTP 邮件渠道（smtp:// 前缀）视为有效的内置通知目标，允许通过告警门槛校验
         } else if (!effectiveTgBotToken || String(effectiveTgBotToken).trim().length === 0) {
           return createBadRequestResponse('tgBotTokenRequired');
         }

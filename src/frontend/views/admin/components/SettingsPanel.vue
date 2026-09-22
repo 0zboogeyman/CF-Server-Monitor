@@ -267,6 +267,7 @@
             <label class="form-label">{{ trans.notificationChannel || 'Notification Channel' }}</label>
             <select v-model="notificationChannel" class="form-select">
               <option value="builtin">{{ trans.builtinNotification || 'Built-in' }}</option>
+              <option value="smtp">{{ trans.smtpNotification || 'SMTP Email' }}</option>
               <option value="webhook">{{ trans.customWebhook || 'Custom Webhook' }}</option>
             </select>
           </div>
@@ -320,6 +321,71 @@
               <button type="button" class="password-toggle" @click="$emit('toggle-password', 'tgChatId')">
                 {{ passwordVisible.tgChatId ? '🙈' : '👁️' }}
               </button>
+            </div>
+          </div>
+        </div>
+
+        <div v-else-if="notificationChannel === 'smtp'" class="resource-alert-rule">
+          <div class="resource-alert-rule-title">
+            <span>{{ trans.smtpNotification || 'SMTP Email' }}</span>
+            <HelpTooltip :text="trans.smtpTip || 'Sends plain-text email via cloudflare:sockets (25 port is blocked by Cloudflare Workers). QQ / 163 require an SMTP authorization code, not the login password.'" />
+          </div>
+
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label class="form-label">{{ trans.smtpHost || 'SMTP Host' }}</label>
+              <input type="text" name="smtp_host" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" v-model.trim="smtpConfig.host" class="form-input" placeholder="smtp.example.com">
+            </div>
+
+            <div class="form-group flex-1">
+              <label class="form-label">
+                {{ trans.smtpPort || 'Port' }}
+                <HelpTooltip :text="trans.smtpPortTip || 'Cloudflare Workers blocks port 25. Use 465 (implicit TLS) or 587 (STARTTLS).'" />
+              </label>
+              <input type="number" name="smtp_port" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" v-model.trim="smtpConfig.port" class="form-input" list="smtp-port-presets" placeholder="465">
+              <datalist id="smtp-port-presets">
+                <option v-for="port in smtpPortPresets" :key="port" :value="port"></option>
+              </datalist>
+            </div>
+
+            <div class="form-group flex-1">
+              <label class="form-label">{{ trans.smtpSecure || 'Encryption' }}</label>
+              <select v-model="smtpConfig.secure" class="form-select">
+                <option value="auto">{{ trans.smtpSecureAuto || 'Auto (by port)' }}</option>
+                <option value="tls">{{ trans.smtpSecureTls || 'Implicit TLS (465)' }}</option>
+                <option value="starttls">{{ trans.smtpSecureStarttls || 'STARTTLS (587)' }}</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label class="form-label">{{ trans.smtpUser || 'Username' }}</label>
+              <input type="text" name="smtp_user" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" v-model.trim="smtpConfig.username" class="form-input" placeholder="you@example.com">
+            </div>
+
+            <div class="form-group flex-1">
+              <label class="form-label">{{ trans.smtpPassword || 'Password' }}</label>
+              <div class="password-input-wrapper">
+                <input type="text" name="smtp_password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" v-model="smtpConfig.password" :class="['form-input', { 'secret-input-masked': !passwordVisible.smtpPassword }]" placeholder="SMTP password / app password">
+                <button type="button" class="password-toggle" @click="$emit('toggle-password', 'smtpPassword')">
+                  {{ passwordVisible.smtpPassword ? '🙈' : '👁️' }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label class="form-label">{{ trans.smtpFrom || 'From' }}</label>
+              <input type="text" name="smtp_from" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" v-model.trim="smtpConfig.from" @blur="validateSmtpField('from')" class="form-input" placeholder="optional, defaults to username">
+              <p v-if="smtpErrors.from" class="text-danger text-sm">{{ smtpErrors.from }}</p>
+            </div>
+
+            <div class="form-group flex-1">
+              <label class="form-label">{{ trans.smtpTo || 'Recipients' }}</label>
+              <input type="text" name="smtp_to" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" v-model.trim="smtpConfig.to" @blur="validateSmtpField('to')" class="form-input" placeholder="a@example.com,b@example.com">
+              <p v-if="smtpErrors.to" class="text-danger text-sm">{{ smtpErrors.to }}</p>
             </div>
           </div>
         </div>
@@ -1012,12 +1078,162 @@ const formatWssHourRange = hour => {
   return `${localHourText}:00-${localHourText}:59 ${props.trans.localTime} (${utcHourText}:00-${utcHourText}:59 UTC)`
 }
 
+// SMTP 通知复用后端 tg_bot_token 字段，采用前缀协议存储（方案 A）：
+// smtp://<user>:<pass>@<host>:<port>?from=<from>&to=<a,b>&secure=<auto|tls|starttls>
+const SMTP_PORT_PRESETS = ['465', '587', '2525']
+const smtpPortPresets = SMTP_PORT_PRESETS
+const defaultSmtpConfig = () => ({
+  host: '',
+  port: '465',
+  username: '',
+  password: '',
+  from: '',
+  to: '',
+  secure: 'auto'
+})
+const smtpConfig = reactive(defaultSmtpConfig())
+const smtpChannelActive = ref(false)
+const smtpErrors = reactive({ from: '', to: '' })
+const SMTP_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+const isSmtpToken = token => String(token || '').trim().toLowerCase().indexOf('smtp:') === 0
+
+const safeDecode = value => {
+  try {
+    return decodeURIComponent(value)
+  } catch (_) {
+    return value
+  }
+}
+
+const buildSmtpToken = cfg => {
+  const host = String(cfg.host || '').trim()
+  if (!host) return ''
+  const userinfo = `${encodeURIComponent(cfg.username || '')}:${encodeURIComponent(cfg.password || '')}`
+  const params = new URLSearchParams()
+  if (String(cfg.from || '').trim()) params.set('from', String(cfg.from).trim())
+  if (String(cfg.to || '').trim()) params.set('to', String(cfg.to).trim())
+  if (cfg.secure && cfg.secure !== 'auto') params.set('secure', cfg.secure)
+  const query = params.toString()
+  const port = String(cfg.port || '').trim()
+  return `smtp://${userinfo}@${host}${port ? `:${port}` : ''}${query ? `?${query}` : ''}`
+}
+
+const parseSmtpToken = token => {
+  try {
+    const url = new URL(String(token).trim())
+    return {
+      host: url.hostname || '',
+      port: url.port || '',
+      username: safeDecode(url.username || ''),
+      password: safeDecode(url.password || ''),
+      from: url.searchParams.get('from') || '',
+      to: url.searchParams.get('to') || '',
+      secure: url.searchParams.get('secure') || 'auto'
+    }
+  } catch (_) {
+    return defaultSmtpConfig()
+  }
+}
+
+const applySmtpToken = token => {
+  Object.assign(smtpConfig, parseSmtpToken(token))
+}
+
+const validateSmtpField = (field) => {
+  if (field === 'from') {
+    const value = String(smtpConfig.from || '').trim()
+    // 发件人可留空（默认使用用户名），填写时必须是合法邮箱地址
+    if (!value) {
+      smtpErrors.from = ''
+      return true
+    }
+    if (!SMTP_EMAIL_PATTERN.test(value)) {
+      smtpErrors.from = props.trans.smtpInvalidEmail || 'Enter a valid email address, e.g. user@example.com'
+      return false
+    }
+    smtpErrors.from = ''
+    return true
+  }
+  if (field === 'to') {
+    const list = String(smtpConfig.to || '')
+      .split(',')
+      .map(address => address.trim())
+      .filter(Boolean)
+    if (list.length === 0) {
+      smtpErrors.to = props.trans.smtpToRequired || 'At least one recipient email is required'
+      return false
+    }
+    if (list.some(address => !SMTP_EMAIL_PATTERN.test(address))) {
+      smtpErrors.to = props.trans.smtpInvalidEmail || 'Enter a valid email address, e.g. user@example.com'
+      return false
+    }
+    smtpErrors.to = ''
+    return true
+  }
+  return true
+}
+
+// SMTP 渠道激活时校验发件人/收件人格式；供保存与测试通知前调用
+const validateSmtpFields = () => {
+  if (!smtpChannelActive.value) {
+    smtpErrors.from = ''
+    smtpErrors.to = ''
+    return true
+  }
+  const fromValid = validateSmtpField('from')
+  const toValid = validateSmtpField('to')
+  return fromValid && toValid
+}
+
 const notificationChannel = computed({
-  get: () => props.settings.notification_webhook_enabled ? 'webhook' : 'builtin',
+  get: () => {
+    if (props.settings.notification_webhook_enabled) return 'webhook'
+    if (smtpChannelActive.value || isSmtpToken(props.settings.tg_bot_token)) return 'smtp'
+    return 'builtin'
+  },
   set: (value) => {
-    props.settings.notification_webhook_enabled = value === 'webhook'
+    if (value === 'webhook') {
+      smtpChannelActive.value = false
+      props.settings.notification_webhook_enabled = true
+      return
+    }
+    props.settings.notification_webhook_enabled = false
+    if (value === 'smtp') {
+      if (isSmtpToken(props.settings.tg_bot_token)) {
+        applySmtpToken(props.settings.tg_bot_token)
+      } else {
+        Object.assign(smtpConfig, defaultSmtpConfig())
+      }
+      smtpChannelActive.value = true
+      props.settings.tg_bot_token = buildSmtpToken(smtpConfig)
+      return
+    }
+    // builtin：离开 SMTP 时清理前缀协议 token，避免渠道识别串台
+    if (smtpChannelActive.value || isSmtpToken(props.settings.tg_bot_token)) {
+      props.settings.tg_bot_token = ''
+      props.settings.tg_chat_id = ''
+    }
+    smtpChannelActive.value = false
   }
 })
+
+// smtpConfig 变化实时序列化到 tg_bot_token（仅 SMTP 渠道激活时）
+watch(smtpConfig, () => {
+  if (smtpChannelActive.value) {
+    props.settings.tg_bot_token = buildSmtpToken(smtpConfig)
+  }
+}, { deep: true })
+
+// 外部（如设置加载）写入 smtp token 时反向解析到表单
+watch(() => props.settings.tg_bot_token, (token) => {
+  if (isSmtpToken(token)) {
+    smtpChannelActive.value = true
+    if (buildSmtpToken(smtpConfig) !== String(token).trim()) {
+      applySmtpToken(token)
+    }
+  }
+}, { immediate: true })
 
 const ensureResourceAlertRules = () => {
   if (!Array.isArray(props.settings.resource_alert_rules)) {
@@ -1233,5 +1449,5 @@ onBeforeUnmount(() => {
   clearTimeout(githubCallbackCopiedTimer)
 })
 
-defineExpose({ validateCspField, cspErrors, validatePingNodes, pingNodeErrors })
+defineExpose({ validateCspField, cspErrors, validatePingNodes, pingNodeErrors, validateSmtpFields, smtpErrors })
 </script>

@@ -1007,7 +1007,7 @@ const toggleAdminPasswordChange = () => {
 }
 
 const { visibility: passwordVisible, toggle: togglePassword } = usePasswordVisibility([
-  'login', 'tgBotToken', 'tgChatId', 'notificationWebhookUrl', 'turnstileSecret', 'githubClientSecret', 'cloudflareToken', 'jwtSecret', 'password', 'confirmPassword'
+  'login', 'tgBotToken', 'tgChatId', 'notificationWebhookUrl', 'smtpPassword', 'turnstileSecret', 'githubClientSecret', 'cloudflareToken', 'jwtSecret', 'password', 'confirmPassword'
 ])
 
 const {
@@ -1628,6 +1628,9 @@ const saveSettings = async () => {
     const cspStaticValid = settingsPanelRef.value.validateCspField('csp_static')
     const cspApiValid = settingsPanelRef.value.validateCspField('csp_api')
     if (!cspStaticValid || !cspApiValid) {
+      return
+    }
+    if (!settingsPanelRef.value.validateSmtpFields()) {
       return
     }
   }
@@ -2547,6 +2550,9 @@ const queryD1Usage = async () => {
 
 const sendTestNotification = async () => {
   if (testNotificationLoading.value) return
+  if (settingsPanelRef.value && !settingsPanelRef.value.validateSmtpFields()) {
+    return
+  }
   testNotificationLoading.value = true
   try {
     const result = await adminApiForSite({
