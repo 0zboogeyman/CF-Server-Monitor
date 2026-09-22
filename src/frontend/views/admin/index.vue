@@ -1631,6 +1631,7 @@ const saveSettings = async () => {
       return
     }
     if (!settingsPanelRef.value.validateSmtpFields()) {
+      validationError.value = trans.value.smtpConfigInvalid || 'SMTP configuration is incomplete, please check the SMTP settings'
       return
     }
   }

@@ -334,7 +334,8 @@
           <div class="form-row">
             <div class="form-group flex-1">
               <label class="form-label">{{ trans.smtpHost || 'SMTP Host' }}</label>
-              <input type="text" name="smtp_host" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" v-model.trim="smtpConfig.host" class="form-input" placeholder="smtp.example.com">
+              <input type="text" name="smtp_host" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" v-model.trim="smtpConfig.host" @blur="validateSmtpField('host')" class="form-input" placeholder="smtp.example.com">
+              <p v-if="smtpErrors.host" class="text-danger text-sm">{{ smtpErrors.host }}</p>
             </div>
 
             <div class="form-group flex-1">
@@ -342,15 +343,16 @@
                 {{ trans.smtpPort || 'Port' }}
                 <HelpTooltip :text="trans.smtpPortTip || 'Cloudflare Workers blocks port 25. Use 465 (implicit TLS) or 587 (STARTTLS).'" />
               </label>
-              <input type="number" name="smtp_port" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" v-model.trim="smtpConfig.port" class="form-input" list="smtp-port-presets" placeholder="465">
+              <input type="number" name="smtp_port" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" v-model.trim="smtpConfig.port" @blur="validateSmtpField('port')" class="form-input" list="smtp-port-presets" placeholder="465">
               <datalist id="smtp-port-presets">
                 <option v-for="port in smtpPortPresets" :key="port" :value="port"></option>
               </datalist>
+              <p v-if="smtpErrors.port" class="text-danger text-sm">{{ smtpErrors.port }}</p>
             </div>
 
             <div class="form-group flex-1">
               <label class="form-label">{{ trans.smtpSecure || 'Encryption' }}</label>
-              <select v-model="smtpConfig.secure" class="form-select">
+              <select v-model="smtpConfig.secure" @change="validateSmtpField('port')" class="form-select">
                 <option value="auto">{{ trans.smtpSecureAuto || 'Auto (by port)' }}</option>
                 <option value="tls">{{ trans.smtpSecureTls || 'Implicit TLS (465)' }}</option>
                 <option value="starttls">{{ trans.smtpSecureStarttls || 'STARTTLS (587)' }}</option>
@@ -361,17 +363,19 @@
           <div class="form-row">
             <div class="form-group flex-1">
               <label class="form-label">{{ trans.smtpUser || 'Username' }}</label>
-              <input type="text" name="smtp_user" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" v-model.trim="smtpConfig.username" class="form-input" placeholder="you@example.com">
+              <input type="text" name="smtp_user" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" v-model.trim="smtpConfig.username" @blur="validateSmtpField('username')" class="form-input" placeholder="you@example.com">
+              <p v-if="smtpErrors.username" class="text-danger text-sm">{{ smtpErrors.username }}</p>
             </div>
 
             <div class="form-group flex-1">
               <label class="form-label">{{ trans.smtpPassword || 'Password' }}</label>
               <div class="password-input-wrapper">
-                <input type="text" name="smtp_password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" v-model="smtpConfig.password" :class="['form-input', { 'secret-input-masked': !passwordVisible.smtpPassword }]" placeholder="SMTP password / app password">
+                <input type="text" name="smtp_password" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" data-form-type="other" v-model="smtpConfig.password" @blur="validateSmtpField('password')" :class="['form-input', { 'secret-input-masked': !passwordVisible.smtpPassword }]" placeholder="SMTP password / app password">
                 <button type="button" class="password-toggle" @click="$emit('toggle-password', 'smtpPassword')">
                   {{ passwordVisible.smtpPassword ? '🙈' : '👁️' }}
                 </button>
               </div>
+              <p v-if="smtpErrors.password" class="text-danger text-sm">{{ smtpErrors.password }}</p>
             </div>
           </div>
 
@@ -1080,7 +1084,7 @@ const formatWssHourRange = hour => {
 
 // SMTP 通知复用后端 tg_bot_token 字段，采用前缀协议存储（方案 A）：
 // smtp://<user>:<pass>@<host>:<port>?from=<from>&to=<a,b>&secure=<auto|tls|starttls>
-const SMTP_PORT_PRESETS = ['465', '587', '2525']
+const SMTP_PORT_PRESETS = ['465', '587']
 const smtpPortPresets = SMTP_PORT_PRESETS
 const defaultSmtpConfig = () => ({
   host: '',
@@ -1093,7 +1097,10 @@ const defaultSmtpConfig = () => ({
 })
 const smtpConfig = reactive(defaultSmtpConfig())
 const smtpChannelActive = ref(false)
-const smtpErrors = reactive({ from: '', to: '' })
+// SMTP 序列化结果是否已覆写共享的 tg_bot_token 字段；
+// 在 SMTP 配置成形（host/用户名/密码齐全）之前不覆写，避免清空 Telegram/飞书等已有渠道配置
+const smtpTokenApplied = ref(false)
+const smtpErrors = reactive({ host: '', username: '', password: '', port: '', from: '', to: '' })
 const SMTP_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const isSmtpToken = token => String(token || '').trim().toLowerCase().indexOf('smtp:') === 0
@@ -1140,7 +1147,38 @@ const applySmtpToken = token => {
   Object.assign(smtpConfig, parseSmtpToken(token))
 }
 
+// 将 SMTP 表单序列化写入共享的 tg_bot_token；配置未成形时保留原有渠道值
+const syncSmtpToken = () => {
+  const token = buildSmtpToken(smtpConfig)
+  if (!smtpTokenApplied.value) {
+    if (!token || !smtpConfig.username || !smtpConfig.password) return
+    smtpTokenApplied.value = true
+  }
+  props.settings.tg_bot_token = token
+}
+
+const smtpRequiredMessage = () => props.trans.smtpFieldRequired || 'This field is required'
+
 const validateSmtpField = (field) => {
+  if (field === 'host' || field === 'username' || field === 'password') {
+    const valid = Boolean(String(smtpConfig[field] || '').trim())
+    smtpErrors[field] = valid ? '' : smtpRequiredMessage()
+    return valid
+  }
+  if (field === 'port') {
+    const port = Number(String(smtpConfig.port || '').trim())
+    if (!Number.isInteger(port) || port <= 0 || port > 65535 || port === 25) {
+      smtpErrors.port = props.trans.smtpPortInvalid || 'Invalid port (1-65535, port 25 is blocked by Cloudflare Workers)'
+      return false
+    }
+    // auto 模式下仅 465/587 可保证加密连接，其他端口必须显式选择加密方式，避免凭据明文传输
+    if (smtpConfig.secure === 'auto' && port !== 465 && port !== 587) {
+      smtpErrors.port = props.trans.smtpSecureRequired || 'Ports other than 465/587 require an explicit encryption method'
+      return false
+    }
+    smtpErrors.port = ''
+    return true
+  }
   if (field === 'from') {
     const value = String(smtpConfig.from || '').trim()
     // 发件人可留空（默认使用用户名），填写时必须是合法邮箱地址
@@ -1174,16 +1212,15 @@ const validateSmtpField = (field) => {
   return true
 }
 
-// SMTP 渠道激活时校验发件人/收件人格式；供保存与测试通知前调用
+// 当前渠道为 SMTP 时校验全部必填项；供保存与测试通知前调用
 const validateSmtpFields = () => {
-  if (!smtpChannelActive.value) {
-    smtpErrors.from = ''
-    smtpErrors.to = ''
+  if (notificationChannel.value !== 'smtp') {
+    Object.keys(smtpErrors).forEach(key => { smtpErrors[key] = '' })
     return true
   }
-  const fromValid = validateSmtpField('from')
-  const toValid = validateSmtpField('to')
-  return fromValid && toValid
+  return ['host', 'username', 'password', 'port', 'from', 'to']
+    .map(field => validateSmtpField(field))
+    .every(Boolean)
 }
 
 const notificationChannel = computed({
@@ -1202,26 +1239,29 @@ const notificationChannel = computed({
     if (value === 'smtp') {
       if (isSmtpToken(props.settings.tg_bot_token)) {
         applySmtpToken(props.settings.tg_bot_token)
+        smtpTokenApplied.value = true
       } else {
         Object.assign(smtpConfig, defaultSmtpConfig())
+        smtpTokenApplied.value = false
       }
       smtpChannelActive.value = true
-      props.settings.tg_bot_token = buildSmtpToken(smtpConfig)
+      syncSmtpToken()
       return
     }
-    // builtin：离开 SMTP 时清理前缀协议 token，避免渠道识别串台
-    if (smtpChannelActive.value || isSmtpToken(props.settings.tg_bot_token)) {
+    // builtin：仅当共享字段确实被 SMTP 覆写时才清理，保留尚未被覆盖的原渠道配置
+    if (isSmtpToken(props.settings.tg_bot_token)) {
       props.settings.tg_bot_token = ''
       props.settings.tg_chat_id = ''
     }
     smtpChannelActive.value = false
+    smtpTokenApplied.value = false
   }
 })
 
-// smtpConfig 变化实时序列化到 tg_bot_token（仅 SMTP 渠道激活时）
+// smtpConfig 变化实时序列化到 tg_bot_token（仅 SMTP 渠道激活且配置成形后）
 watch(smtpConfig, () => {
   if (smtpChannelActive.value) {
-    props.settings.tg_bot_token = buildSmtpToken(smtpConfig)
+    syncSmtpToken()
   }
 }, { deep: true })
 
@@ -1229,6 +1269,7 @@ watch(smtpConfig, () => {
 watch(() => props.settings.tg_bot_token, (token) => {
   if (isSmtpToken(token)) {
     smtpChannelActive.value = true
+    smtpTokenApplied.value = true
     if (buildSmtpToken(smtpConfig) !== String(token).trim()) {
       applySmtpToken(token)
     }

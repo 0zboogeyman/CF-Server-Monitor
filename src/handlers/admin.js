@@ -729,11 +729,12 @@ async function handleSendTestNotificationAction({ data }) {
     });
     if(result) {
       console.warn('Test notification failed:', result);
-      return createBadRequestResponse('testNotificationFailed');
+      // 附带具体失败原因，前端 i18n 未命中时会原样展示（不含密码等敏感信息）
+      return createBadRequestResponse(`testNotificationFailed: ${result}`);
     }
     return createSuccessResponse({ success: true, message: 'testNotificationSent' });
   } catch (e) {
-    return createBadRequestResponse('testNotificationFailed');
+    return createBadRequestResponse(`testNotificationFailed: ${e?.message || e}`);
   }
 }
 
