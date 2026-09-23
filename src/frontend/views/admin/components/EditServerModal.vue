@@ -94,6 +94,13 @@
             <option v-for="day in 31" :key="day" :value="day">{{ day }}</option>
           </select>
         </div>
+        <div class="form-group flex-1">
+          <label class="form-label">
+            {{ trans.trafficAlertPercent }} (%)
+            <HelpTooltip :text="trans.trafficAlertPercentTip" />
+          </label>
+          <input type="number" name="edit_traffic_alert_percent" autocomplete="off" v-model="editForm.traffic_alert_percent" class="form-input" placeholder="0" min="0" max="100" step="1">
+        </div>
       </div>
 
       <div class="form-row mobile-two-row">

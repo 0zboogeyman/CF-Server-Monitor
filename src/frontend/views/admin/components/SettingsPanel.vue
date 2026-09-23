@@ -480,6 +480,16 @@
           </div>
         </div>
 
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label class="form-label">
+              {{ trans.trafficAlertThreshold }} (%)
+              <HelpTooltip :text="trans.trafficAlertThresholdTip" />
+            </label>
+            <input type="number" v-model.number="settings.traffic_alert_threshold" class="form-input" min="0" max="100" step="1" placeholder="0">
+          </div>
+        </div>
+
         <div class="resource-alert-header">
           <button
             type="button"

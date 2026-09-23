@@ -17,6 +17,12 @@ import {
   normalizeNotificationWebhookMethod,
   debug
 } from '../utils/settings.js';
+import {
+  GB,
+  getTrafficUsageBytes,
+  normalizePct,
+  normalizeTrafficLimitGb
+} from '../utils/traffic.js';
 import { detectBillingCycle, isEnabledFlag, normalizeBillingCycle, renewExpireDateIfNeeded } from '../utils/serverBilling.js';
 import {
   NOTIFICATION_MAX_RETRIES,
@@ -636,6 +642,85 @@ function hasNotificationTarget(settings) {
   }
   // 内置渠道（含 SMTP）只要 tg_bot_token 非空即视为已配置目标
   return String(settings?.tg_bot_token || '').trim().length > 0;
+}
+
+// ===== 月流量阈值告警（上报路径触发，账期重置=数值回落，状态={u,th,lim}）=====
+const TRAFFIC_ALERT_STATE_KEY = 'traffic_alert_state';
+const TRAFFIC_ALERT_RESET_FACTOR = 0.5;
+
+function parseTrafficAlertState(raw) {
+  if (!raw) return null;
+  try {
+    const o = JSON.parse(raw);
+    if (o && Number.isFinite(o.u) && o.u > 0) {
+      return { u: Math.round(o.u), th: normalizePct(o.th), lim: normalizeTrafficLimitGb(o.lim) };
+    }
+  } catch (_) {}
+  return null;
+}
+
+// hooks.patchCache?.(serverId, valueOrNull) —— 缓存实现由调用方注入，本函数不 import 任何 cache 模块
+export async function evaluateTrafficAlert(env, server, metrics, hooks = {}) {
+  try {
+    if (!env?.DB || !server || !metrics) return;
+
+    const limit = normalizeTrafficLimitGb(server.traffic_limit);
+    if (limit <= 0) return; // 未设限额：不监控
+
+    const settings = await loadSiteSettings(env.DB);
+    const globalPct = normalizePct(settings?.traffic_alert_threshold);
+    const pctServer = normalizePct(server.traffic_alert_percent);
+    const effectivePct = pctServer > 0 ? pctServer : globalPct;
+    if (effectivePct <= 0) return;                 // 阈值关闭
+    if (!hasNotificationTarget(settings)) return;  // 未配置通知渠道：不发也不写
+
+    const used = Math.round(getTrafficUsageBytes(
+      metrics.net_rx_monthly,
+      metrics.net_tx_monthly,
+      server.traffic_calc_type
+    ));
+    const limitBytes = limit * GB;
+    const percent = (used / limitBytes) * 100;
+
+    const oldStr = server[TRAFFIC_ALERT_STATE_KEY] == null ? '' : String(server[TRAFFIC_ALERT_STATE_KEY]);
+    const state = parseTrafficAlertState(server[TRAFFIC_ALERT_STATE_KEY]);
+
+    if (state) {
+      // ① 回落=新账期/重装/大校正 → 持久清零（不可只在内存即时重算）
+      if (used < state.u * TRAFFIC_ALERT_RESET_FACTOR) {
+        const { meta } = await env.DB.prepare(
+          `UPDATE servers SET traffic_alert_state = NULL WHERE id = ? AND COALESCE(traffic_alert_state,'') = ?`
+        ).bind(server.id, oldStr).run();
+        if (meta && meta.changes > 0) hooks.patchCache?.(server.id, null);
+        return;
+      }
+      // ② 规则签名一致且未回落 → 同账期已发，抑制
+      if (state.th === effectivePct && state.lim === limit) return;
+      // ③ th/lim 变 → 重新可发，继续
+    }
+
+    if (percent < effectivePct) return; // 未达阈值
+
+    // 先发后写
+    const serverName = server.name || server.id;
+    const msg = `${serverName}  本月已用 ${(used / GB).toFixed(1)} GB / 限额 ${limit} GB（${percent.toFixed(1)}% ≥ ${effectivePct}%）`;
+    const err = await sendNotification(settings, msg, {
+      event: '月流量告警',
+      emoji: '📈',
+      clients: [serverName],
+      count: 1,
+      message: msg
+    });
+    if (err) return; // 失败：不写，下次上报重试
+
+    const newStr = JSON.stringify({ u: used, th: effectivePct, lim: limit });
+    const { meta } = await env.DB.prepare(
+      `UPDATE servers SET traffic_alert_state = ? WHERE id = ? AND COALESCE(traffic_alert_state,'') = ?`
+    ).bind(newStr, server.id, oldStr).run();
+    if (meta && meta.changes > 0) hooks.patchCache?.(server.id, newStr);
+  } catch (e) {
+    console.error('[traffic-alert] evaluate failed:', e);
+  }
 }
 
 const SMTP_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

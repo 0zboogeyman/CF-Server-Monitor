@@ -3,6 +3,7 @@ import { getLatestMetricsForAllServers } from '../database/schema.js';
 import { getAllServers, clearServersListCache } from '../utils/cache.js';
 import { clearAppearanceSettingsCache, isValidThemeOptions, isWssReportConfigured, isWssReportEnabled, normalizeBooleanSetting, normalizeDefaultLanguage, normalizeDisplayMode, normalizeExpireNotificationTime, normalizeExpireReminder, normalizeFrontendWsTimeoutMinutes, normalizeLongHistoryPoints, normalizeNotificationTemplate, normalizeNotificationTimezone, normalizeNotificationWebhookBody, normalizeNotificationWebhookFormat, normalizeNotificationWebhookHeaders, normalizeNotificationWebhookMethod, normalizePreferredTheme, normalizeResourceAlertRules, normalizeTgNotify, normalizeWssReportHours, saveSiteOptions, saveThemeOptions, SITE_FIELDS, APPEARANCE_FIELDS } from '../utils/settings.js';
 import { mergeMetricsIntoServer } from '../utils/metrics.js';
+import { normalizePct } from '../utils/traffic.js';
 import { verifyTurnstileToken, hashPassword } from '../utils/common.js';
 import { AppError, createSuccessResponse, createBadRequestResponse, createUnauthorizedResponse, createErrorResponse } from '../utils/errors.js';
 import { addServerColumns } from '../database/updateDatabase.js';
@@ -1036,7 +1037,7 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
       });
     }
     else if (data.action === 'edit') {
-      const { id, name, server_group, region, tags, note, price, billing_cycle, auto_renewal, currency, expire_date, traffic_limit, traffic_calc_type, interface: networkInterfaceInput, reset_day, collect_interval, report_interval, wss_report_interval, connection_mode, ping_mode, auto_update, custom_ct, custom_cu, custom_cm, custom_bd, node_1, node_2, node_3, node_4, rx_correction, tx_correction, offline_notify_disabled, is_hidden } = data;
+      const { id, name, server_group, region, tags, note, price, billing_cycle, auto_renewal, currency, expire_date, traffic_limit, traffic_calc_type, traffic_alert_percent, interface: networkInterfaceInput, reset_day, collect_interval, report_interval, wss_report_interval, connection_mode, ping_mode, auto_update, custom_ct, custom_cu, custom_cm, custom_bd, node_1, node_2, node_3, node_4, rx_correction, tx_correction, offline_notify_disabled, is_hidden } = data;
       if (!id || !isValidUUID(id)) {
         return createBadRequestResponse('invalidServerId');
       }
@@ -1091,7 +1092,7 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
       try {
         await env.DB.prepare(`
           UPDATE servers
-          SET name = ?, server_group = ?, region = ?, tags = ?, note = ?, price = ?, billing_cycle = ?, auto_renewal = ?, currency = ?, expire_date = ?, traffic_limit = ?, traffic_calc_type = ?, "interface" = ?, reset_day = ?, collect_interval = ?, report_interval = ?, wss_report_interval = ?, connection_mode = ?, ping_mode = ?, auto_update = ?, custom_ct = ?, custom_cu = ?, custom_cm = ?, custom_bd = ?, node_1 = ?, node_2 = ?, node_3 = ?, node_4 = ?, rx_correction = ?, tx_correction = ?, offline_notify_disabled = ?, is_hidden = ?
+          SET name = ?, server_group = ?, region = ?, tags = ?, note = ?, price = ?, billing_cycle = ?, auto_renewal = ?, currency = ?, expire_date = ?, traffic_limit = ?, traffic_calc_type = ?, "interface" = ?, reset_day = ?, collect_interval = ?, report_interval = ?, wss_report_interval = ?, connection_mode = ?, ping_mode = ?, auto_update = ?, custom_ct = ?, custom_cu = ?, custom_cm = ?, custom_bd = ?, node_1 = ?, node_2 = ?, node_3 = ?, node_4 = ?, rx_correction = ?, tx_correction = ?, offline_notify_disabled = ?, is_hidden = ?, traffic_alert_percent = ?
           WHERE id = ?
         `).bind(
           name || '',
@@ -1126,6 +1127,7 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
           safeTx,
           normalizeBooleanFlag(offline_notify_disabled),
           normalizeBooleanFlag(is_hidden),
+          normalizePct(traffic_alert_percent),
           id
         ).run();
       } catch (e) {
@@ -1240,8 +1242,8 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
               currency, expire_date,
               traffic_limit, traffic_calc_type, "interface", reset_day, collect_interval, report_interval, wss_report_interval, connection_mode, ping_mode,
               auto_update, custom_ct, custom_cu, custom_cm, custom_bd, node_1, node_2, node_3, node_4, rx_correction, tx_correction,
-              offline_notify_disabled, is_hidden, sort_order, history_partition_id, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              offline_notify_disabled, is_hidden, sort_order, history_partition_id, timestamp, traffic_alert_percent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).bind(
             server.id,
             server.name || '',
@@ -1276,7 +1278,8 @@ export async function handleAdminAPI(request, env, sys, loadFullSettings = null,
             normalizeBooleanFlag(server.is_hidden),
             server.sort_order ?? 0,
             partitionId,
-            server.timestamp || Date.now()
+            server.timestamp || Date.now(),
+            normalizePct(server.traffic_alert_percent)
           ).run();
           imported++;
         } catch (e) {
