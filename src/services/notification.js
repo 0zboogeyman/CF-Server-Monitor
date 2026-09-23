@@ -17,7 +17,7 @@ import {
   normalizeNotificationWebhookMethod,
   debug
 } from '../utils/settings.js';
-import { detectBillingCycle, normalizeBillingCycle, renewExpireDateIfNeeded } from '../utils/serverBilling.js';
+import { detectBillingCycle, isEnabledFlag, normalizeBillingCycle, renewExpireDateIfNeeded } from '../utils/serverBilling.js';
 import {
   NOTIFICATION_MAX_RETRIES,
   NOTIFICATION_RETRY_DELAY_MS,
@@ -1220,23 +1220,27 @@ export async function checkExpiringServers(db, options = {}) {
     const expiringServers = [];
     const reminderDays = getExpireReminderDays(siteSettings.expire_reminder);
     const shouldNotify = reminderDays > 0 && hasNotificationTarget(siteSettings);
-    let hasRenewedServers = false;
+    const renewedServers = [];
     const currentDateSerial = getZonedDateSerial(now, siteSettings.notification_timezone);
 
     for (const s of allServers) {
       if (!s.expire_date) continue;
 
       const billingCycle = normalizeBillingCycle(detectBillingCycle(s.price) || s.billing_cycle);
-      const renewal = renewExpireDateIfNeeded(s.expire_date, billingCycle, s.auto_renewal, now, 1);
+      // 续费时机 = 到期日 - min(提醒天数, 5)，最长提前 5 天
+      const renewal = renewExpireDateIfNeeded(s.expire_date, billingCycle, s.auto_renewal, now, Math.min(reminderDays, 5));
       if (renewal.renewed) {
         await db.prepare(
           'UPDATE servers SET expire_date = ?, billing_cycle = ? WHERE id = ?'
         ).bind(renewal.expire_date, billingCycle, s.id).run();
         s.expire_date = renewal.expire_date;
         s.billing_cycle = billingCycle;
-        hasRenewedServers = true;
+        renewedServers.push({ name: s.name, expire_date: renewal.expire_date });
         debug(`[Cron] 服务器 ${s.name} 已自动续费，到期日期更新为 ${s.expire_date}`);
       }
+
+      // 勾选自动续费的节点只走「续费成功」提醒，不计入到期提醒
+      if (isEnabledFlag(s.auto_renewal)) continue;
 
       if (!shouldNotify) continue;
 
@@ -1252,21 +1256,42 @@ export async function checkExpiringServers(db, options = {}) {
       }
     }
 
-    if (hasRenewedServers) {
+    if (renewedServers.length > 0) {
       clearServersListCache();
+
+      // 续费成功提醒：与「到期提醒」开关解耦，只要配置了通知渠道就发送
+      if (hasNotificationTarget(siteSettings)) {
+        const renewalList = renewedServers.map(s => `${s.name}  新到期 ${s.expire_date}`).join('\n');
+        debug(`[Cron] 发送自动续费成功通知: ${renewalList}`);
+        try {
+          await sendNotification(siteSettings, renewalList, {
+            event: '服务器自动续费成功',
+            emoji: '✅',
+            clients: renewedServers.map(s => s.name),
+            count: renewedServers.length,
+            message: renewalList
+          });
+        } catch (e) {
+          console.error('自动续费成功通知发送失败:', e);
+        }
+      }
     }
 
     if (expiringServers.length > 0) {
       const serverList = expiringServers.map(s => `${s.name}  剩余${s.days}天  ${s.expire_date}`).join('\n');
       const msg = serverList;
       debug(`[Cron] 发送到期提醒通知: ${msg}`);
-      await sendNotification(siteSettings, msg, {
-        event: '服务器到期提醒',
-        emoji: '⚠️',
-        clients: expiringServers.map(s => s.name),
-        count: expiringServers.length,
-        message: serverList
-      });
+      try {
+        await sendNotification(siteSettings, msg, {
+          event: '服务器到期提醒',
+          emoji: '⚠️',
+          clients: expiringServers.map(s => s.name),
+          count: expiringServers.length,
+          message: serverList
+        });
+      } catch (e) {
+        console.error('服务器到期提醒通知发送失败:', e);
+      }
     }
     return true;
   } catch (e) {
