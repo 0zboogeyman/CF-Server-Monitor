@@ -41,7 +41,7 @@
         </div>
 
         <div class="form-row">
-          <div class="form-group  ">
+          <div class="form-group ">
             <label class="form-label">
               {{ trans.bgImage }}
               <HelpTooltip :text="trans.remoteImageTip" />
@@ -70,9 +70,7 @@
             </div>
             <img v-if="settings.custom_bg_mobile" :src="settings.custom_bg_mobile" class="bg-preview">
           </div>
-        </div>
 
-        <div class="form-row">
           <div class="form-group">
             <label class="form-label">
               {{ trans.favicon }}
@@ -92,10 +90,20 @@
         <div class="form-row">
           <div class="form-group flex-1">
             <label class="form-label">
-              {{ trans.themeOptions }}
-              <HelpTooltip :text="trans.themeOptionsTip" />
+              {{ trans.cspStatic }}
+              <HelpTooltip :text="trans.cspStaticTip" />
             </label>
-            <textarea v-model="settings.theme_options" class="form-textarea" rows="5" placeholder='{"mikus":1}'></textarea>
+            <input type="text" v-model="settings.csp_static" class="form-input" placeholder="https://unpkg.com,https://cdn.jsdelivr.net" @blur="validateCspField('csp_static')">
+            <p v-if="cspErrors.csp_static" class="text-danger text-sm">{{ cspErrors.csp_static }}</p>
+          </div>
+
+          <div class="form-group flex-1">
+            <label class="form-label">
+              {{ trans.cspApi }}
+              <HelpTooltip :text="trans.cspApiTip" />
+            </label>
+            <input type="text" v-model="settings.csp_api" class="form-input" placeholder="https://api.example.com" @blur="validateCspField('csp_api')">
+            <p v-if="cspErrors.csp_api" class="text-danger text-sm">{{ cspErrors.csp_api }}</p>
           </div>
         </div>
       </div>
@@ -123,20 +131,10 @@
         <div class="form-row">
           <div class="form-group flex-1">
             <label class="form-label">
-              {{ trans.cspStatic }}
-              <HelpTooltip :text="trans.cspStaticTip" />
+              {{ trans.themeOptions }}
+              <HelpTooltip :text="trans.themeOptionsTip" />
             </label>
-            <input type="text" v-model="settings.csp_static" class="form-input" placeholder="https://unpkg.com,https://cdn.jsdelivr.net" @blur="validateCspField('csp_static')">
-            <p v-if="cspErrors.csp_static" class="text-danger text-sm">{{ cspErrors.csp_static }}</p>
-          </div>
-
-          <div class="form-group flex-1">
-            <label class="form-label">
-              {{ trans.cspApi }}
-              <HelpTooltip :text="trans.cspApiTip" />
-            </label>
-            <input type="text" v-model="settings.csp_api" class="form-input" placeholder="https://api.example.com" @blur="validateCspField('csp_api')">
-            <p v-if="cspErrors.csp_api" class="text-danger text-sm">{{ cspErrors.csp_api }}</p>
+            <textarea v-model="settings.theme_options" class="form-textarea" rows="5" placeholder='{"mikus":1}'></textarea>
           </div>
         </div>
 
@@ -1002,7 +1000,7 @@ const cspErrors = reactive({
 
 const offlineNotifyOptions = computed(() => [
   { value: '0', label: `${props.trans.disabled}` },
-  ...[3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 30].map(minutes => {
+  ...[5, 6, 7, 8, 9, 10, 15, 20, 30].map(minutes => {
     const label = props.trans.notifyOfflineMinutes
       ? props.trans.notifyOfflineMinutes.replace('{minutes}', minutes)
       : `${minutes} min`
