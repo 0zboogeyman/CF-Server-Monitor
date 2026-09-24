@@ -21,6 +21,7 @@ import {
   GB,
   getTrafficUsageBytes,
   normalizePct,
+  normalizePctOrNull,
   normalizeTrafficLimitGb
 } from '../utils/traffic.js';
 import { detectBillingCycle, isEnabledFlag, normalizeBillingCycle, renewExpireDateIfNeeded } from '../utils/serverBilling.js';
@@ -669,9 +670,10 @@ export async function evaluateTrafficAlert(env, server, metrics, hooks = {}) {
 
     const settings = await loadSiteSettings(env.DB);
     const globalPct = normalizePct(settings?.traffic_alert_threshold);
-    const pctServer = normalizePct(server.traffic_alert_percent);
-    const effectivePct = pctServer > 0 ? pctServer : globalPct;
-    if (effectivePct <= 0) return;                 // 阈值关闭
+    // 逐台阈值三态：null/未设置 → 跟随全局；数字（含 0）→ 覆盖，0 = 显式关闭该服务器告警
+    const pctServer = normalizePctOrNull(server.traffic_alert_percent);
+    const effectivePct = pctServer === null ? globalPct : pctServer;
+    if (effectivePct <= 0) return;                 // 阈值关闭 / 该服务器显式关闭
     if (!hasNotificationTarget(settings)) return;  // 未配置通知渠道：不发也不写
 
     const used = Math.round(getTrafficUsageBytes(

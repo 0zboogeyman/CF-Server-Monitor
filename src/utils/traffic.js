@@ -20,6 +20,16 @@ export function normalizePct(value) {
   return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0;
 }
 
+// 逐台月流量告警阈值三态规范化：
+// - null / undefined / ''（未设置）→ null：跟随全局阈值
+// - 其余（含显式 0）→ 夹取到 0..100 的整数：0 = 该服务器显式关闭告警
+export function normalizePctOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = typeof value === 'number' ? value : parseInt(value, 10);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, n));
+}
+
 // 按计算类型取当月已用字节
 export function getTrafficUsageBytes(rxMonthly, txMonthly, calcType) {
   const rx = parseFloat(rxMonthly) || 0;

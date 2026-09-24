@@ -4,6 +4,7 @@ import {
   GB,
   getTrafficUsageBytes,
   normalizePct,
+  normalizePctOrNull,
   normalizeTrafficLimitGb
 } from '../src/utils/traffic.js';
 import { evaluateTrafficAlert } from '../src/services/notification.js';
@@ -53,7 +54,8 @@ function makeServer(overrides = {}) {
     name: 'Box',
     traffic_limit: '1000',
     traffic_calc_type: 'total',
-    traffic_alert_percent: 0,
+    // null = 跟随全局阈值（新语义）；显式 0 表示该服务器关闭告警
+    traffic_alert_percent: null,
     traffic_alert_state: null,
     ...overrides
   };
@@ -88,6 +90,15 @@ test('normalizeTrafficLimitGb / normalizePct 消除格式差异', () => {
   assert.equal(normalizePct(150), 100);
   assert.equal(normalizePct(-5), 0);
   assert.equal(normalizePct('x'), 0);
+  // 三态：空值 → null（跟随全局），数字含 0 → 夹取整数
+  assert.equal(normalizePctOrNull(null), null);
+  assert.equal(normalizePctOrNull(undefined), null);
+  assert.equal(normalizePctOrNull(''), null);
+  assert.equal(normalizePctOrNull('x'), null);
+  assert.equal(normalizePctOrNull(0), 0);
+  assert.equal(normalizePctOrNull('70'), 70);
+  assert.equal(normalizePctOrNull(150), 100);
+  assert.equal(normalizePctOrNull(-5), 0);
 });
 
 test('getTrafficUsageBytes 与前端算法逐模式对齐', () => {
@@ -204,6 +215,27 @@ test('逐台阈值优先于全局', async () => {
     makeSiteSettings({ traffic_alert_threshold: '80' }) // 全局 80 不触发
   );
   assert.equal(f, 1);
+});
+
+test('逐台留空（null）跟随全局阈值', async () => {
+  const used = 820 * GB; // 82% ≥ 全局 80
+  const { fetchCalls: f } = await run(
+    makeServer({ traffic_alert_percent: null }),
+    { net_rx_monthly: used, net_tx_monthly: 0 },
+    makeSiteSettings({ traffic_alert_threshold: '80' })
+  );
+  assert.equal(f, 1);
+});
+
+test('逐台显式 0：超过全局阈值也不触发（该服务器关闭告警）', async () => {
+  const used = 900 * GB; // 90%
+  const { writes, fetchCalls: f } = await run(
+    makeServer({ traffic_alert_percent: 0 }),
+    { net_rx_monthly: used, net_tx_monthly: 0 },
+    makeSiteSettings({ traffic_alert_threshold: '80' })
+  );
+  assert.equal(f, 0);
+  assert.equal(writes.length, 0);
 });
 
 test('未配置通知渠道：不发也不写', async () => {

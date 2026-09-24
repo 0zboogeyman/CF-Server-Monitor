@@ -1034,7 +1034,7 @@ const editForm = ref({
   expire_date: '',
   traffic_limit: '',
   traffic_calc_type: 'total',
-  traffic_alert_percent: 0,
+  traffic_alert_percent: null,
   interface: '',
   reset_day: 1,
   collect_interval: 0,
@@ -1065,7 +1065,7 @@ const createBatchEditDefaults = () => ({
   expire_date: '',
   traffic_limit: '',
   traffic_calc_type: 'total',
-  traffic_alert_percent: 0,
+  traffic_alert_percent: null,
   interface: '',
   reset_day: 1,
   collect_interval: 0,
@@ -2063,6 +2063,14 @@ const copyUninstallCmd = async () => {
   }, 1500)
 }
 
+// 逐台月流量告警阈值：空/未设置 → null（跟随全局）；否则夹取 0..100 整数（0 = 该服务器显式关闭）
+const normalizeTrafficAlertPercentField = (value) => {
+  if (value === '' || value === null || value === undefined) return null
+  const n = parseInt(value, 10)
+  if (!Number.isFinite(n)) return null
+  return Math.max(0, Math.min(100, n))
+}
+
 const createEditFormFromServer = (server) => ({
     id: server.id,
     name: server.name || '',
@@ -2077,7 +2085,7 @@ const createEditFormFromServer = (server) => ({
     expire_date: server.expire_date || '',
     traffic_limit: server.traffic_limit || '',
     traffic_calc_type: server.traffic_calc_type || 'total',
-    traffic_alert_percent: Number(server.traffic_alert_percent) || 0,
+    traffic_alert_percent: server.traffic_alert_percent ?? '',
     interface: server.interface || '',
     reset_day: server.reset_day ?? 1,
     collect_interval: server.collect_interval ?? 0,
@@ -2163,7 +2171,7 @@ const buildEditPayloadFromForm = (form) => {
       expire_date: normalizedExpireDate,
       traffic_limit: form.traffic_limit,
       traffic_calc_type: form.traffic_calc_type,
-      traffic_alert_percent: Number(form.traffic_alert_percent) || 0,
+      traffic_alert_percent: normalizeTrafficAlertPercentField(form.traffic_alert_percent),
       interface: form.interface,
       reset_day: form.reset_day,
       collect_interval: form.collect_interval,
@@ -2230,7 +2238,7 @@ const saveEdit = async () => {
     expire_date: normalizedExpireDate,
     traffic_limit: editForm.value.traffic_limit,
     traffic_calc_type: editForm.value.traffic_calc_type,
-    traffic_alert_percent: Number(editForm.value.traffic_alert_percent) || 0,
+    traffic_alert_percent: normalizeTrafficAlertPercentField(editForm.value.traffic_alert_percent),
     interface: editForm.value.interface,
     reset_day: editForm.value.reset_day,
     collect_interval: editForm.value.collect_interval,
